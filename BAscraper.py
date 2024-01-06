@@ -1,23 +1,19 @@
 import requests
 import time
 import logging
+import json
 
 from dataclasses import dataclass
 from typing import List
 from datetime import datetime, timedelta
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock, RLock
 from queue import Queue
 
-import json
-from dotenv import load_dotenv
-import os
-
-logging.basicConfig(format='%(levelname)s:%(message)s',
-                    filename='scrape_log.log',
-                    filemode='w',
-                    level=logging.DEBUG)
+# imports no longer used
+# from threading import Lock, RLock
+# from dotenv import load_dotenv
+# import os
 
 
 # for Google custom search engine key - not implemented yet
@@ -37,8 +33,7 @@ class Pushpull:
                  timeout=10,
                  threads=10,
                  comment_t=None,
-                 batch_size=0,
-                 debug=True):
+                 batch_size=0):
 
         '''
         might add these params from pmaw
@@ -54,10 +49,10 @@ class Pushpull:
         self.timeout = timeout  # time until it's considered as timout err
         self.comment_t = comment_t if comment_t else threads  # no. of threads used for comment fetching, defaults to 'threads'
         self.batch_size = batch_size  # not implemented yet, for RAM offload to disk
-        self.debug = debug
 
-        self.print_lock = RLock()
-        self.data_lock = Lock()
+        # locks are no longer used for now
+        # self.print_lock = RLock()
+        # self.data_lock = Lock()
 
         # google custom search engine creds
         if Gcreds:
@@ -66,6 +61,22 @@ class Pushpull:
             self.cse_api = Gcreds.CSE_API_KEY
         else:
             print("no CSEcred detected. you'll need it to use the Google Custom Search Engine")
+
+        self.logger = logging.getLogger('BAlogger')
+        self.logger.setLevel(logging.DEBUG)
+
+        logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s:%(message)s',
+                            filename='scrape_log.log',
+                            filemode='w',
+                            level=logging.DEBUG)
+
+        # create console handler and set level to debug
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)
+
+        formatter = logging.Formatter('%(levelname)s - %(message)s')
+        ch.setFormatter(formatter)
+        self.logger.addHandler(ch)
 
     def get_submissions(self,
                         after: datetime,
@@ -113,7 +124,7 @@ class Pushpull:
         def _ask():
             inp = input('Would you like to enable timeframe based scraping? (Y/n) ').lower()
             if inp in ['y', '']:
-                logging.info("timeframe based scraping is enabled. 'sort' is fixed to 'desc'")
+                self.logger.info("timeframe based scraping is enabled. 'sort' is fixed to 'desc'")
                 return True
             elif inp == 'n':
                 return False
@@ -121,7 +132,7 @@ class Pushpull:
                 _ask()
 
         if sort_type != 'created_utc':
-            (logging.warning
+            (self.logger.warning
              (f"sort_type: '{sort_type}' does not support timeframe based scraping. defaulting to {limit} posts"))
             timeframe_mode = False
         else:
@@ -165,7 +176,7 @@ class Pushpull:
                     thread_params = dict(params)  # make a shallow copy for thread safety
                     thread_params['after'] = round(splitpoints[i].timestamp())
                     thread_params['before'] = round(splitpoints[i + 1].timestamp())
-                    logging.info(f"started thread no.{i} | {datetime.fromtimestamp(thread_params['before'])} <- "
+                    self.logger.info(f"started thread no.{i} | {datetime.fromtimestamp(thread_params['before'])} <- "
                                  f"{datetime.fromtimestamp(thread_params['after'])}")
                     time.sleep(1)
                     futures.append(executor.submit(self._make_post_request_timeframe,
@@ -178,7 +189,7 @@ class Pushpull:
             response = [post for sl in response for post in sl]  # de-nest the response
             response = {d['id']: d for d in response}  # index based on ID to dict
 
-            logging.info(f'fetching posts time: {time.time() - s}sec')
+            self.logger.info(f'fetching posts time: {time.time() - s}sec')
 
         else:
             response = self._make_request(url, params)
@@ -186,7 +197,7 @@ class Pushpull:
 
         # comment fetching
         if get_comments:
-            logging.info('\nstarting comment fetching...\n')
+            self.logger.info('\nstarting comment fetching...\n')
             comment_ids = Queue()
             [comment_ids.put(post['id']) for _, post in response.items()]  # create a Queue of post_id
             comment_url = 'https://api.pullpush.io/reddit/search/comment/'
@@ -194,8 +205,7 @@ class Pushpull:
             with ThreadPoolExecutor() as executor:
                 futures = []
                 for i in range(self.comment_t):
-                    if self.debug:
-                        logging.debug(f'started thread no.{i}')
+                    self.logger.debug(f'started thread no.{i}')
                     futures.append(executor.submit(self._make_comment_request_queue, q=comment_ids,
                                                    url=comment_url, params={}, thread_id=i))
                     time.sleep(.5)
@@ -203,11 +213,11 @@ class Pushpull:
                 for future in as_completed(futures):
                     # futures.as_completed will hold the main thread until all threads are complete
                     fu_result, thread_id = future.result()
-                    logging.debug(f't-{thread_id}: writing comments to data')
+                    self.logger.debug(f't-{thread_id}: writing comments to data')
                     for id, comments in fu_result.items():
                         if id in response:
                             response[id]['comments'] = comments
-            logging.info(f'fetching comments time: {time.time() - s}sec')
+            self.logger.info(f'fetching comments time: {time.time() - s}sec')
 
         # filtering - also includes the 'comments' field in case comments were scraped.e
         response = {post_id: {k: v[k] for k in filters + ['comments'] if k in v} for post_id, v in
@@ -221,7 +231,7 @@ class Pushpull:
             try:
                 response = requests.get(url, params=params, headers=headers, timeout=self.timeout)
                 if len(response.json()['data']):
-                    logging.info(
+                    self.logger.info(
                         f"t-{thread_id}: {response.status_code} {'OK' if response.ok else 'ERR'} - {response.elapsed}")
                 time.sleep(self.sleepsec)
 
@@ -229,19 +239,19 @@ class Pushpull:
 
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as err:
                 retries += 1
-                logging.warning(
+                self.logger.warning(
                     f"t-{thread_id}: {err}\n{'=' * 25}\nRetrying... Attempt {retries}/{self.max_retries}")
                 time.sleep(self.backoffsec * retries)  # backoff
 
             except json.decoder.JSONDecodeError:
                 retries += 1
-                logging.warning(
+                self.logger.warning(
                     f"t-{thread_id}: JSONDecodeError: Retrying... Attempt {retries}/{self.max_retries}")
 
             except Exception as err:
                 raise Exception(f't-{thread_id}: unexpected error: {err}')
 
-        logging.error(f't-{thread_id}: failed request attempt. skipping...')
+        self.logger.error(f't-{thread_id}: failed request attempt. skipping...')
 
     ######################################
     # worker functions for multithreading #
@@ -252,12 +262,12 @@ class Pushpull:
         # returns an indexed dict! {link_id : [data]}
         results = dict()
         while not q.empty():
-            logging.debug(f't-{thread_id}: q.get()')
+            self.logger.debug(f't-{thread_id}: q.get()')
             link_id = q.get()
             params['link_id'] = link_id
-            logging.debug(f't-{thread_id}: making request')
+            self.logger.debug(f't-{thread_id}: making request')
             results[link_id] = self._make_request(url, params, thread_id)
-            logging.info(f't-{thread_id}: {q.qsize()} comments left')
+            self.logger.info(f't-{thread_id}: {q.qsize()} comments left')
         return results, thread_id
 
     def _make_post_request_timeframe(self, url, params, thread_id, headers={}) -> (list, int):
@@ -265,15 +275,15 @@ class Pushpull:
         results = list()
 
         while True:
-            logging.debug(f't-{thread_id}: making request')
+            self.logger.debug(f't-{thread_id}: making request')
             res = self._make_request(url, params, thread_id, headers)
             if not len(res):
-                logging.info(f't-{thread_id}: finished.')
+                self.logger.info(f't-{thread_id}: finished.')
                 return results, thread_id  # when result is empty, finish scraping
 
             results += res
             try:
-                logging.debug(f't-{thread_id}: getting new pivot')
+                self.logger.debug(f't-{thread_id}: getting new pivot')
                 params['before'] = round(float(results[-1]['created_utc']))
 
             except KeyError as err:
@@ -284,17 +294,11 @@ class Pushpull:
 
 
 if __name__ == '__main__':
-    pp = Pushpull(debug=True, sleepsec=3, threads=4)
+    # example code
+    pp = Pushpull(sleepsec=3, threads=4)
 
-    '''
-    filter = ['author', 'author_flair_text', 'created', 'id', 'link_flair_text', 'over_18', 'score', 'title', 'ups']
-    result = pp.get_submissions(after=datetime(2023, 12, 30), before=datetime.now(), filter=filter,
-                               subreddit='bluearchive', sort='desc')
-    with open("test.json", "w", encoding='utf-8') as outfile: 
-        json.dump(result, outfile, indent=4)
-    '''
+    result = pp.get_submissions(after=datetime(2023, 12, 30), before=datetime(2024, 1, 1),
+                                subreddit='bluearchive', get_comments=True)
 
-    result = pp.get_submissions(after=datetime(2023, 12, 1), before=datetime(2024, 1, 1),
-                                subreddit='bluearchive', sort='desc')
-    with open("./data/12.json", "w", encoding='utf-8') as outfile:
+    with open("example.json", "w", encoding='utf-8') as outfile:
         json.dump(result, outfile, indent=4)
