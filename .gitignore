@@ -1,0 +1,3 @@
+/BAScraper_venv/
+.env
+/scrape_log.log
