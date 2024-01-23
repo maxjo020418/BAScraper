@@ -228,7 +228,7 @@ class Pushpull:
                 for future in as_completed(futures):
                     # futures.as_completed will hold the main thread until complete
                     comment_response, thread_id = future.result()
-                    submission_response[thread_id] = comment_response
+                    submission_response[len(submission_response) - 1 - thread_id] = comment_response
 
             submission_response = [post for batch in submission_response for post in batch]  # de-nest the submission_response
 
@@ -291,7 +291,7 @@ class Pushpull:
 
         return submission_response
 
-    def _make_request(self, mode, params, thread_id=0, headers=None) -> list:
+    def _make_request(self, mode, params, thread_id=0, prev_id=None, headers=None) -> list:
 
         assert mode in ['submission', 'comment'], "`mode` should be one of ['submission', 'comment']"
         url = self.submission_url if mode == 'submission' else self.comment_url
@@ -301,6 +301,22 @@ class Pushpull:
         retries = 0
         while retries < self.max_retries:
             try:
+                '''
+                the cutoff point in which the retrieved post would end is generally vague
+                say, there are 15 posts that are posted at epoch 1705801461 and the API might reach the `limit`
+                and stop retrieving results, only scraping 10 out of 15 posts at 1705801461.
+                the logic below generally tries to solve this potential issue.
+
+                The IDs are generally sequential, which means newer posts or comments will usually have a higher ID value.
+                1. overlap the `after` for 1 epoch for the next request
+                2. get the last id from the result
+                3. if (the last id) > (first id from second request) then start from (the last id)
+                '''
+                try:
+                    params['after'] = params['after']-2 if prev_id else params['after']-1
+                except KeyError:
+                    pass
+
                 response = requests.get(url, params=params, headers=headers, timeout=self.timeout)
 
                 if response.ok:
@@ -311,7 +327,23 @@ class Pushpull:
                                         f"\n{response.text}\n")
 
                 time.sleep(self.sleepsec)
-                return response.json()['data']
+
+                # TODO: add a thing that can handle situations where there are more than 100 post/comments in a second,
+                #  especially when adding the comment/only fetching feature is implemented since in that scenario
+                #  it might happen. which might cause an infinite loop
+                result = response.json()['data']
+                if prev_id:
+                    if int(result[0]['id'], base=36) < int(prev_id, base=36):
+                        logging.warning("this shouldn't happen... date misaligned")
+                    else:
+                        for i, v in enumerate(result):
+                            if v['id'] == prev_id:
+                                return result[i+1:]
+                            else:
+                                logging.warning("this shouldn't happen... `prev_id` not found ")
+                                return result
+
+                return result
 
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as err:
                 retries += 1
@@ -359,7 +391,6 @@ class Pushpull:
             else:
                 indexed[ent['id']] = ent
 
-        # TODO: add appropriate duplicate_action here
         # duplicate_action: ['newest', 'oldest', 'remove', 'keep_original', 'keep_removed']
         for link_id, v in dupes.items():
             match duplicate_action:
@@ -466,7 +497,7 @@ class Pushpull:
         while not q.empty():  # if Queue is empty, end thread
 
             # retrieve an ID from the queue and set that as the link_id reqeust param
-            self.logger.info(f't-{thread_id}: {q.qsize()} comments left')
+            self.logger.info(f't-{thread_id}: {q.qsize()} comment groups left')
             link_id = q.get()
             params['link_id'] = link_id
 
@@ -505,7 +536,7 @@ class Pushpull:
             results += result
 
             try:
-                # set new
+                # set new pivot, result always returns starting from most-recent
                 self.logger.debug(f't-{thread_id}: getting new pivot')
                 params['before'] = round(float(results[-1]['created_utc']))
 
@@ -521,7 +552,7 @@ if __name__ == '__main__':
     pp = Pushpull(sleepsec=3, threads=4)
 
     res = pp.get_submissions(after=datetime(2024, 1, 1), before=datetime(2024, 1, 1, 6),
-                             subreddit='bluearchive', get_comments=True, duplicate_action='keep_original')
+                             subreddit='cars', get_comments=True, duplicate_action='keep_original')
     # ['newest', 'oldest', 'remove', 'keep_original', 'keep_removed']
 
     with open("example.json", "w", encoding='utf-8') as outfile:
