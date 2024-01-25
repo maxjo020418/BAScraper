@@ -8,9 +8,10 @@ It's pretty basic but planning to add some more features as it goes. I'm also pl
 It uses multithreading to make requests to the PullPush.io endpoint and returns the result as a JSON(dict) object.
 
 currently it can:
-- get submissions from a certain subreddit in supported order/sorting methods specified in the PullPush.io API docs
+- get submissions/comments from a certain subreddit in supported order/sorting methods specified in the PullPush.io API docs
 - get comments under the retrieved submissions
 - can get all the submissions based on the number of submissions or in a certain timeframe you specify
+- can recover(if possible) deleted/removed submission/comments from the returned result
 
 I also have a tool that can organize, clean, and analyze reddit submission and comment data, which I am planning to release it with this or separately after some polishing.
 
@@ -31,7 +32,7 @@ datetime -> datetime, timedelta
 concurrent.futures -> ThreadPoolExecutor, as_completed
 queue -> Queue
 ```
-The only non-default package is `requests`, any version should be fine. also python 3.7+ is recommended due to the use of `dataclasses` (which is not used yet but is planned to).
+The only non-default package is `requests`, any version should be fine. also python 3.10+ is recommended
 
 **Example usage**
 ```python
