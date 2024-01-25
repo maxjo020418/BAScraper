@@ -85,6 +85,8 @@ class Pushpull:
         ch.setFormatter(formatter)
         self.logger.addHandler(ch)
 
+    # TODO: make it so that when `ids` field is used,
+    #  try to use `_make_request_from_queued_id` function for large batches
     def get_submissions(self,
                         after: datetime = None,
                         before: datetime = None,
@@ -108,82 +110,9 @@ class Pushpull:
                         stickied: bool = None,
                         spoiler: bool = None,
                         contest_mode: bool = None):
-        """
-        :param after:
-        :param before:
-        :param get_comments:
-        :param duplicate_action:
-        :param filters:
-        :param sort:
-        :param sort_type:
-        :param limit:
-        :param ids:
-        :param q:
-        :param title:
-        :param selftext:
-        :param author:
-        :param subreddit:
-        :param score:
-        :param num_comments:
-        :param over_18:
-        :param is_video:
-        :param locked:
-        :param stickied:
-        :param spoiler:
-        :param contest_mode:
-        :return:
 
-        this will only scrape based on date, so 'after' and 'before' is mandatory
-        also, 'limit' is the number of posts per request, not the total no.
-
-        if ('after' OR 'before' is None) OR ('sort_type' is NOT 'created_utc')
-        it will only scrape up to 'limit' amount of posts.
-
-        might add these params from pmaw
-        max_sleep (int, optional): Maximum rate-limit sleep time (in seconds) between requests, defaults to 60s.
-        rate_limit (int, optional): Target number of requests per minute for rate-averaging,
-                                    defaults to 60 requests per minute.
-
-        dupe detection(removed posts & comments) will work under the premise that the API returns
-        2 values which is like: [...{removed submission}, {old cached submission}...]
-        I have to check if it'll return more than 2 values - perhaps posts/comments being edited
-        """
-
-        # check params
-        assert duplicate_action in ['newest', 'oldest', 'remove', 'keep_original', 'keep_removed'], \
-            "'duplicates' should be one of ['newest', 'oldest', 'remove', 'keep_original', 'keep_removed']"
-        assert sort in ['desc', 'asc'], "'sort' should be one of ['desc', 'asc']"
-        assert sort_type in ['created_utc', 'score', 'num_comments'], \
-            "'sort_type' should be one of ['created_utc', 'score', 'num_comments', 'created_utc']"
-        assert limit <= 100, "'limit' should be <= 100"
-        if after and before:
-            assert after <= before, "'after' cannot be bigger than 'before'!"
-
-        def _ask():  # TODO: remove this and do automatically, get default config as param
-            inp = input('Would you like to enable timeframe based scraping? (Y/n) ').lower()
-            if inp in ['y', '']:
-                self.logger.info("timeframe based scraping is enabled. 'sort' is fixed to 'desc'")
-                return True
-            elif inp == 'n':
-                return False
-            else:
-                _ask()
-
-        if not (after or before):  # no date specified, so using default
-            timeframe_mode = False
-        elif sort_type != 'created_utc':  # unable to paginate in this case
-            (self.logger.warning
-             (f"sort_type: '{sort_type}' does not support getting more than {limit} posts. "
-              f"pagination is not possible."))
-            timeframe_mode = False
-        else:
-            timeframe_mode = _ask()
-            if timeframe_mode:
-                # in timeframe_mode sort needs to be fixed to descending
-                # due to how _make_timeframe_submission_request works
-                if sort == 'asc':
-                    self.logger.warning("'sort' method will default to 'desc' due to how pagination works.")
-                    sort = 'desc'
+        assert isinstance(after, datetime) and isinstance(before, datetime), \
+            '`after` and `before` needs to be a `datetime` instance'
 
         params = {
             'sort': sort,
@@ -207,47 +136,22 @@ class Pushpull:
             'contest_mode': contest_mode,
         }
 
-        if timeframe_mode:
-            # splitting up the timeframe for multithreading
-            interval = (before - after) / self.threads
-            splitpoints = [interval * i + after for i in range(self.threads + 1)]
-            submission_response = [None for _ in range(self.threads)]
-            s = time.time()
+        # check params
+        check_result = self._check_params(**params)
 
-            with ThreadPoolExecutor() as executor:
-                futures = []
-                for i in range(self.threads):
-                    thread_params = dict(params)  # make a shallow copy for thread safety
-                    thread_params['after'] = round(splitpoints[i].timestamp())
-                    thread_params['before'] = round(splitpoints[i + 1].timestamp())
-                    self.logger.info(f"started thread no.{i} | {datetime.fromtimestamp(thread_params['before'])} <- "
-                                     f"{datetime.fromtimestamp(thread_params['after'])}")
-                    time.sleep(1)
-                    futures.append(executor.submit(self._make_timeframe_submission_request,
-                                                   params=thread_params, thread_id=i))
-                for future in as_completed(futures):
-                    # futures.as_completed will hold the main thread until complete
-                    comment_response, thread_id = future.result()
-                    submission_response[len(submission_response) - 1 - thread_id] = comment_response
+        if check_result == 'timeframe-mode':
+            submission_responses = self._timeframe_multithreader('submission', after, before, sort, params)
 
-            submission_response = [post for batch in submission_response for post in batch]  # de-nest the submission_response
-
-            self.logger.info(f'submission fetching time: {time.time() - s}sec')
+        elif check_result == 'single-mode' or check_result == 'size-mode':
+            # TODO: later make it able to handle 100+ sizes - E: can't be done with MT perhaps
+            # just make a single request. no need for multithreading
+            submission_responses = self._make_request('submission', params)
 
         else:
-            # if not timeframe_mode, just make a single request. no need for multithreading
-            submission_response = self._make_request('submission', params)
-
-        ################################################################################
-        # TODO: also, add the logic for this:
-        # get the last id from the result
-        # overlap the `after` for 1 epoch for the next request
-        # if (the last id) > (first id from second request) then start from (the last id)
-        ################################################################################
+            raise Exception("`check_result`: that's not supposed to happen")
 
         # indexing based on ID to dict with dupe detection
-        self.logger.info(f"indexing submissions...")
-        submission_response, submission_dupes = self.preprocess_json(submission_response, duplicate_action)
+        submission_responses, submission_dupes = self.preprocess_json(submission_responses, duplicate_action)
 
         with open('dupe_submissions.json', 'w') as f:
             json.dump(submission_dupes, f, indent=4)
@@ -256,18 +160,18 @@ class Pushpull:
         if get_comments:
             self.logger.info('starting comment fetching...')
             post_ids = Queue()
-            [post_ids.put(post['id']) for post in submission_response.values()]  # create a Queue of post_id
+            [post_ids.put(post['id']) for post in submission_responses.values()]  # create a Queue of post_id
             s = time.time()
             with ThreadPoolExecutor() as executor:
                 futures = list()
                 for i in range(self.comment_t):
                     self.logger.debug(f'started thread no.{i}')
-                    futures.append(executor.submit(self._make_queued_comment_request, q=post_ids,
-                                                   params={}, thread_id=i))
+                    futures.append(executor.submit(self._make_request_from_queued_id, q=post_ids,
+                                                   params={}, thread_id=i, mode='comment', q_type='link_id'))
                     time.sleep(.5)
 
-                for submission_id in submission_response:  # create the comments entry and initialize it to empty list
-                    submission_response[submission_id]['comments'] = list()
+                for submission_id in submission_responses:  # create the comments entry and initialize it to empty list
+                    submission_responses[submission_id]['comments'] = list()
 
                 dupes_list = list()
 
@@ -277,21 +181,78 @@ class Pushpull:
                     self.logger.debug(f't-{thread_id}: writing comments to data')
                     comment_response, comment_dupes = self.preprocess_json(comment_response, duplicate_action)
                     for comments in comment_response.values():
-                        submission_response[comments['link_id'][3:]]['comments'].append(comments)
+                        submission_responses[comments['link_id'][3:]]['comments'].append(comments)
                     dupes_list.append(comment_dupes)
 
-                with open('dupe_comments.json', 'w') as f:
+                with open('dupe_comments_under_submissions.json', 'w') as f:
                     json.dump(dupes_list, f, indent=4)
 
             self.logger.info(f'comment fetching time: {time.time() - s}sec')
 
-        # filtering - also includes the 'comments' field in case comments were scraped.e
-        submission_response = {post_id: {k: v[k] for k in filters + ['comments'] if k in v} for post_id, v in
-                               submission_response.items()} if filters else submission_response
+        # filtering - also includes the 'comments' field in case comments were scraped.
+        submission_responses = {post_id: {k: v[k] for k in filters + ['comments'] if k in v} for post_id, v in
+                                submission_responses.items()} if filters else submission_responses
 
-        return submission_response
+        return submission_responses
 
-    def _make_request(self, mode, params, thread_id=0, prev_id=None, headers=None) -> list:
+    def get_comments(self,
+                     duplicate_action='newest',
+                     after=None,
+                     before=None,
+                     filters: List[str] = None,
+                     q=None,
+                     ids=None,
+                     limit=100,
+                     sort='desc',
+                     sort_type='created_utc',
+                     author=None,
+                     subreddit=None,
+                     link_id=None):
+
+        assert isinstance(after, datetime) and isinstance(before, datetime), \
+            '`after` and `before` needs to be a `datetime` instance'
+
+        params = {
+            'sort': sort,
+            'sort_type': sort_type,
+            'size': limit,
+            'ids': ','.join(ids) if ids else None,
+            'q': q,
+            'author': author,
+            'subreddit': subreddit,
+            'after': round(after.timestamp()) if after else None,
+            'before': round(before.timestamp()) if before else None,
+            'link_id': link_id,
+        }
+
+        # check params
+        check_result = self._check_params(**params)
+
+        if check_result == 'timeframe-mode':
+            comment_responses = self._timeframe_multithreader('comment', after, before, sort, params)
+
+        elif check_result == 'single-mode' or check_result == 'size-mode':
+            # also make it so that it can handle 100+ size later on
+            # just make a single request. no need for multithreading
+            comment_responses = self._make_request('comment', params)
+
+        else:
+            raise Exception(f"`check_result`: <{check_result}> that's not supposed to happen")
+
+        # indexing based on ID to dict with dupe detection
+        comment_responses, comment_dupes = self.preprocess_json(comment_responses, duplicate_action)
+
+        with open('dupe_comments.json', 'w') as f:
+            json.dump(comment_dupes, f, indent=4)
+
+        # filtering
+        comment_responses = {post_id: {k: v[k] for k in filters if k in v} for post_id, v in
+                             comment_responses.items()} if filters else comment_responses
+
+        return comment_responses
+
+    def _make_request(self, mode, params, thread_id=0, headers=None) -> list:
+        # `after` is inclusive, `before` is exclusive here
 
         assert mode in ['submission', 'comment'], "`mode` should be one of ['submission', 'comment']"
         url = self.submission_url if mode == 'submission' else self.comment_url
@@ -301,21 +262,8 @@ class Pushpull:
         retries = 0
         while retries < self.max_retries:
             try:
-                '''
-                the cutoff point in which the retrieved post would end is generally vague
-                say, there are 15 posts that are posted at epoch 1705801461 and the API might reach the `limit`
-                and stop retrieving results, only scraping 10 out of 15 posts at 1705801461.
-                the logic below generally tries to solve this potential issue.
-
-                The IDs are generally sequential, which means newer posts or comments will usually have a higher ID value.
-                1. overlap the `after` for 1 epoch for the next request
-                2. get the last id from the result
-                3. if (the last id) > (first id from second request) then start from (the last id)
-                '''
-                try:
-                    params['after'] = params['after']-2 if prev_id else params['after']-1
-                except KeyError:
-                    pass
+                if 'after' in params:
+                    params['after'] = params['after']-1
 
                 response = requests.get(url, params=params, headers=headers, timeout=self.timeout)
 
@@ -323,26 +271,11 @@ class Pushpull:
                     self.logger.info(
                         f"t-{thread_id}: {response.status_code} - {response.elapsed}")
                 else:
-                    self.logger.warning(f"t-{thread_id}: {response.status_code} - {response.elapsed}"
-                                        f"\n{response.text}\n")
+                    self.logger.error(f"t-{thread_id}: {response.status_code} - {response.elapsed}"
+                                      f"\n{response.text}\n")
 
                 time.sleep(self.sleepsec)
-
-                # TODO: add a thing that can handle situations where there are more than 100 post/comments in a second,
-                #  especially when adding the comment/only fetching feature is implemented since in that scenario
-                #  it might happen. which might cause an infinite loop
                 result = response.json()['data']
-                if prev_id:
-                    if int(result[0]['id'], base=36) < int(prev_id, base=36):
-                        logging.warning("this shouldn't happen... date misaligned")
-                    else:
-                        for i, v in enumerate(result):
-                            if v['id'] == prev_id:
-                                return result[i+1:]
-                            else:
-                                logging.warning("this shouldn't happen... `prev_id` not found ")
-                                return result
-
                 return result
 
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as err:
@@ -362,6 +295,45 @@ class Pushpull:
 
         self.logger.error(f't-{thread_id}: failed request attempt. skipping...')
         return list()
+
+    def _timeframe_multithreader(self, mode, after, before, sort, params):
+        params['sort'] = 'desc'  # needs to be fixed to `desc` due to pivoting, going to reverse it later if `asc`
+        # splitting up the timeframe for multithreading
+        interval = (before - after) / self.threads
+        splitpoints = [interval * i + after for i in range(self.threads + 1)]
+        responses = [None for _ in range(self.threads)]
+        s = time.time()
+
+        with ThreadPoolExecutor() as executor:
+            futures = []
+            for i in range(self.threads):
+                thread_params = dict(params)  # make a shallow copy for thread safety
+                thread_params['after'] = round(splitpoints[i].timestamp())
+                thread_params['before'] = round(splitpoints[i + 1].timestamp())
+                self.logger.info(f"started thread no.{i} | {datetime.fromtimestamp(thread_params['before'])} <- "
+                                 f"{datetime.fromtimestamp(thread_params['after'])}")
+                time.sleep(1)
+                futures.append(executor.submit(self._make_request_from_timeframe,
+                                               mode=mode, params=thread_params, thread_id=i))
+            for future in as_completed(futures):
+                # futures.as_completed will hold the main thread until complete
+                response, thread_id = future.result()
+                if sort == 'desc':
+                    responses[len(responses) - 1 - thread_id] = response
+                else:  # 'asc'
+                    responses.reverse()
+                    responses[thread_id] = response
+
+        # de-nest the response
+        responses = [post for batch in responses for post in batch]
+
+        self.logger.info(f'{mode} fetching time: {time.time() - s}sec')
+
+        return responses
+
+    #########
+    # Utils #
+    #########
 
     def preprocess_json(self, inp: List[dict], duplicate_action: str) -> (dict, dict):
         """
@@ -437,8 +409,39 @@ class Pushpull:
 
         return indexed, dupes
 
+    def _check_params(self, **parameters):
+        for k, v in parameters.items():
+            if not v:  # ignore for None values
+                continue
+
+            match k:
+                case 'duplicate_action':
+                    assert v in ['newest', 'oldest', 'remove', 'keep_original', 'keep_removed'], \
+                        "'duplicates' should be one of ['newest', 'oldest', 'remove', 'keep_original', 'keep_removed']"
+                case 'sort':
+                    assert v in ['desc', 'asc'], "'sort' should be one of ['desc', 'asc']"
+                case 'sort_type':
+                    assert v in ['created_utc', 'score', 'num_comments'], \
+                        "'sort_type' should be one of ['created_utc', 'score', 'num_comments', 'created_utc']"
+                case 'size':
+                    if v > 100:
+                        self.logger.warning('size based fetching is not yet supported')
+                        return 'size-mode'
+
+
+        if (st := parameters['sort_type']) and st != 'created_utc' and parameters['size'] > 100:
+            self.logger.warning(f"the sort type: `{st}` doesn't support fetching more than 100 results. "
+                                f"if needed, filter/sort the result from a specified timeframe "
+                                f"with sort_type: `created_utc`")
+            return 'single-mode'
+
+        if parameters['after'] and parameters['before']:
+            assert parameters['after'] <= parameters['before'], "'after' cannot be bigger than 'before'!"
+
+        return 'timeframe-mode'
+
     @staticmethod
-    def is_deleted(json_obj):
+    def is_deleted(json_obj) -> bool:
         """
         :param json_obj: dict obj
         :return: `bool` if the submission/comment is deleted or not
@@ -489,71 +492,73 @@ class Pushpull:
     # worker functions for multithreading #
     #######################################
 
-    def _make_queued_comment_request(self, q: Queue, params, thread_id, headers=None) -> (list, int):
+    def _make_request_from_queued_id(self, mode: str, q: Queue, params, thread_id,
+                                     q_type: str = 'ids', headers=None) -> (list, int):
 
+        assert q_type in ['ids', 'link_id'], "q_type should be one of ['ids', 'link_id']"
+        if mode == 'submission':
+            assert q_type == 'ids', "`q_type` can't be anything other than `ids` when `mode` is in `submission`"
         headers = dict() if not headers else headers
 
         results = list()
         while not q.empty():  # if Queue is empty, end thread
 
             # retrieve an ID from the queue and set that as the link_id reqeust param
-            self.logger.info(f't-{thread_id}: {q.qsize()} comment groups left')
-            link_id = q.get()
-            params['link_id'] = link_id
+            self.logger.info(f't-{thread_id}: {q.qsize()} {mode}s{" groups" if q_type == "link_id" else ""} left')
+            params[q_type] = q.get()
 
             # make a request using the new param
             self.logger.debug(f't-{thread_id}: making request')
-            results += self._make_request('comment', params, thread_id, headers)
+            results += self._make_request(mode, params, thread_id, headers)
 
         return results, thread_id
 
-    def _make_timeframe_submission_request(self, params, thread_id, headers=None) -> (List[list], int):
-        """
-        :param params:
-        :param thread_id: for debug and thread tracking purposes
-        :param headers:
-        :return:
-
-        `_make_request` looper - given a `param` that has `before` and `after`,
-        it'll scrape everything in that time range(timeframe).
-        """
-
+    def _make_request_from_timeframe(self, mode: str, params, thread_id, headers=None) -> (list, int):
         assert (type(params['before']), type(params['after'])) == (int, int), \
             "params for _make_timeframe_submission_request needs to have 'before' and 'after' as epoch"
 
         headers = dict() if not headers else headers
 
         results = list()
-
         while True:
             self.logger.debug(f't-{thread_id}: making request')
-            result = self._make_request('submission', params, thread_id, headers)
+            result = self._make_request(mode, params, thread_id, headers)
 
             if not len(result):  # when result is empty, finish scraping
                 self.logger.info(f't-{thread_id}: finished.')
                 return results, thread_id
 
-            results += result
-
             try:
                 # set new pivot, result always returns starting from most-recent
                 self.logger.debug(f't-{thread_id}: getting new pivot')
-                params['before'] = round(float(results[-1]['created_utc']))
+                params['before'] = round(float(result[-1]['created_utc']))
+
+                if len(results):  # if results not empty, start 'omissions within same epoch' detection
+                    pass
+                    # TODO: add 'omissions within same epoch' detection part here
+                    # get the last id from the result
+                    # overlap the `after` for 1 epoch for the next request
+                    # if (the last id) > (first id from second request) then start from (the last id)
 
             except KeyError as err:
                 with open("errfile.json", "w", encoding='utf-8') as f:
                     json.dump(result, f, indent=4)
-
                 raise Exception(f't-{thread_id}: date format problem from submission. (dumped file):\n{err}')
+
+            results += result
 
 
 if __name__ == '__main__':
     # example code
     pp = Pushpull(sleepsec=3, threads=4)
 
-    res = pp.get_submissions(after=datetime(2024, 1, 1), before=datetime(2024, 1, 1, 6),
-                             subreddit='cars', get_comments=True, duplicate_action='keep_original')
+    # res = pp.get_submissions(after=datetime(2024, 1, 1), before=datetime(2024, 1, 2),
+    #                         subreddit='bluearchive', get_comments=True, duplicate_action='keep_original', sort='desc')
     # ['newest', 'oldest', 'remove', 'keep_original', 'keep_removed']
+    res = pp.get_submissions(
+        after=datetime(2024, 1, 1), before=datetime(2024, 1, 1, 3),
+        subreddit='bluearchive', duplicate_action='keep_original', sort='desc', get_comments=True)
+
 
     with open("example.json", "w", encoding='utf-8') as outfile:
         json.dump(res, outfile, indent=4)
