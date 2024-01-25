@@ -34,7 +34,7 @@ class Pushpull:
                  backoffsec=3,
                  max_retries=5,
                  timeout=10,
-                 threads=10,
+                 threads=4,
                  comment_t=None,
                  batch_size=0):
 
@@ -111,9 +111,11 @@ class Pushpull:
                         spoiler: bool = None,
                         contest_mode: bool = None):
 
-        assert isinstance(after, datetime) and isinstance(before, datetime), \
-            '`after` and `before` needs to be a `datetime` instance'
+        if after and before:
+            assert isinstance(after, datetime) and isinstance(before, datetime), \
+                '`after` and `before` needs to be a `datetime` instance'
 
+        pb = lambda x: x if x is None else ('true' if x else 'false')
         params = {
             'sort': sort,
             'sort_type': sort_type,
@@ -128,12 +130,12 @@ class Pushpull:
             'before': round(before.timestamp()) if before else None,
             'score': score,
             'num_comments': num_comments,
-            'over_18': over_18,
-            'is_video': is_video,
-            'locked': locked,
-            'stickied': stickied,
-            'spoiler': spoiler,
-            'contest_mode': contest_mode,
+            'over_18': pb(over_18),
+            'is_video': pb(is_video),
+            'locked': pb(locked),
+            'stickied': pb(stickied),
+            'spoiler': pb(spoiler),
+            'contest_mode': pb(contest_mode),
         }
 
         # check params
@@ -209,8 +211,9 @@ class Pushpull:
                      subreddit=None,
                      link_id=None):
 
-        assert isinstance(after, datetime) and isinstance(before, datetime), \
-            '`after` and `before` needs to be a `datetime` instance'
+        if after and before:
+            assert isinstance(after, datetime) and isinstance(before, datetime), \
+                '`after` and `before` needs to be a `datetime` instance'
 
         params = {
             'sort': sort,
@@ -437,6 +440,10 @@ class Pushpull:
 
         if parameters['after'] and parameters['before']:
             assert parameters['after'] <= parameters['before'], "'after' cannot be bigger than 'before'!"
+            if (p := parameters['sort_type']) != 'created_utc':
+                self.logger.warning(
+                    f'sort_type: <{p}> is not supported while using the `after` and `before` parameters')
+                parameters['sort_type'] = 'created_utc'
 
         return 'timeframe-mode'
 
@@ -555,10 +562,12 @@ if __name__ == '__main__':
     # res = pp.get_submissions(after=datetime(2024, 1, 1), before=datetime(2024, 1, 2),
     #                         subreddit='bluearchive', get_comments=True, duplicate_action='keep_original', sort='desc')
     # ['newest', 'oldest', 'remove', 'keep_original', 'keep_removed']
+    filters = ['title', 'id']
     res = pp.get_submissions(
         after=datetime(2024, 1, 1), before=datetime(2024, 1, 1, 3),
-        subreddit='bluearchive', duplicate_action='keep_original', sort='desc', get_comments=True)
-
+        subreddit='bluearchive', duplicate_action='keep_original', sort='desc', get_comments=True,
+        filters=filters
+    )
 
     with open("example.json", "w", encoding='utf-8') as outfile:
         json.dump(res, outfile, indent=4)
