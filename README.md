@@ -36,7 +36,7 @@ The only non-default package is `requests`, any version should be fine. also pyt
 
 **Example usage**
 ```python
-from BAscraper import Pushpull
+from BAScraper import Pushpull
 
 import requests
 import time
@@ -61,16 +61,18 @@ with open("example.json", "w", encoding='utf-8') as outfile:
 ## _PushPull_ (`__init__`)
 all parameters are optional
 
-| parameter   | type          | description                                                     | default value |
-|-------------|---------------|-----------------------------------------------------------------|---------------|
-| creds       | `List[Creds]` | not implemented yet                                             |               |
-| sleepsec    | `int`         | cooldown time between each request                              | 1             |
-| backoffsec  | `int`         | backoff time for each failed request                            | 3             |
-| max_retries | `int`         | number of retries for failed requests before it gives up        | 5             |
-| timeout     | `int`         | time until it's considered as timout err                        | 10            |
-| threads     | `int`         | no. of threads when multithreading is used                      | 4             |
-| comment_t   | `int`         | no. of threads used for comment fetching, defaults to `threads` |               |
-| batch_size  | `int`         | not implemented yet                                             |               |
+| parameter   | type          | description                                                                                        | default value                     |
+|-------------|---------------|----------------------------------------------------------------------------------------------------|-----------------------------------|
+| creds       | `List[Creds]` | not implemented yet                                                                                |                                   |
+| sleepsec    | `int`         | cooldown time between each request                                                                 | 1                                 |
+| backoffsec  | `int`         | backoff time for each failed request                                                               | 3                                 |
+| max_retries | `int`         | number of retries for failed requests before it gives up                                           | 5                                 |
+| timeout     | `int`         | time until it's considered as timout err                                                           | 10                                |
+| threads     | `int`         | no. of threads when multithreading is used                                                         | 4                                 |
+| comment_t   | `int`         | no. of threads used for comment fetching, defaults to `threads`                                    |                                   |
+| batch_size  | `int`         | not implemented yet                                                                                |                                   |
+| log_level   | `str`         | log level in which is displayed on the console, should be a string representation of logging level | `INFO`                            |
+| cwd         | `str`         | dir path where all the log files and JSON file will be stored                                      | `os.getcwd()` (current directory) |
 
 ## PushPull._get_submissions_ & PushPull._get_comments_
 all parameters are optional
