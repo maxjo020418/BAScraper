@@ -1,3 +1,5 @@
-/BAScraper_venv/
 .env
-/scrape_log.log
+./tests
+./BAScraper.egg-info
+./dist
+./build

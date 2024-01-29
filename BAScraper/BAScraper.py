@@ -10,13 +10,13 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Queue
 
+import os
 from threading import Lock
 import pprint
 pretty = pprint.PrettyPrinter(indent=4).pprint
 
 # imports no longer used
 # from dotenv import load_dotenv
-# import os
 
 
 # for Google custom search engine key - not implemented yet
@@ -36,7 +36,9 @@ class Pushpull:
                  timeout=10,
                  threads=4,
                  comment_t=None,
-                 batch_size=0):
+                 batch_size=0,
+                 log_level='INFO',
+                 cwd=os.getcwd()):
 
         """
         might add these params from pmaw
@@ -56,6 +58,8 @@ class Pushpull:
         self.submission_url = 'https://api.pullpush.io/reddit/search/submission/'
         self.comment_url = 'https://api.pullpush.io/reddit/search/comment/'
 
+        self.cwd = cwd
+
         # Rlocks are no longer used for now
         # self.print_lock = RLock()
         self.file_lock = Lock()
@@ -73,16 +77,17 @@ class Pushpull:
         self.logger.setLevel(logging.DEBUG)
 
         logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s:%(message)s',
-                            filename='scrape_log.log',
+                            filename=os.path.join(self.cwd, 'scrape_log.log'),
                             filemode='w',
                             level=logging.DEBUG)
 
+        assert log_level in ['NOTSET', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'], \
+            '`log_level` should be a string representation of logging level such as `INFO`'
+
         # create console handler and set level
         ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)  # CHANGE HERE TO CONTROL DISPLAYED LOG MESSAGE LEVEL
-
-        formatter = logging.Formatter('%(levelname)s - %(message)s')
-        ch.setFormatter(formatter)
+        ch.setLevel(log_level)  # CHANGE HERE TO CONTROL DISPLAYED LOG MESSAGE LEVEL
+        ch.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
         self.logger.addHandler(ch)
 
     # TODO: make it so that when `ids` field is used,
@@ -155,7 +160,7 @@ class Pushpull:
         # indexing based on ID to dict with dupe detection
         submission_responses, submission_dupes = self.preprocess_json(submission_responses, duplicate_action)
 
-        with open('dupe_submissions.json', 'w') as f:
+        with open(os.path.join(self.cwd, 'dupe_submissions.json'), 'w') as f:
             json.dump(submission_dupes, f, indent=4)
 
         # comment fetching part
@@ -186,7 +191,7 @@ class Pushpull:
                         submission_responses[comments['link_id'][3:]]['comments'].append(comments)
                     dupes_list.append(comment_dupes)
 
-                with open('dupe_comments_under_submissions.json', 'w') as f:
+                with open(os.path.join(self.cwd, 'dupe_comments_under_submissions.json'), 'w') as f:
                     json.dump(dupes_list, f, indent=4)
 
             self.logger.info(f'comment fetching time: {time.time() - s}sec')
@@ -245,7 +250,7 @@ class Pushpull:
         # indexing based on ID to dict with dupe detection
         comment_responses, comment_dupes = self.preprocess_json(comment_responses, duplicate_action)
 
-        with open('dupe_comments.json', 'w') as f:
+        with open(os.path.join(self.cwd, 'dupe_comments.json'), 'w') as f:
             json.dump(comment_dupes, f, indent=4)
 
         # filtering
@@ -270,15 +275,16 @@ class Pushpull:
 
                 response = requests.get(url, params=params, headers=headers, timeout=self.timeout)
 
+                result = response.json()['data']
+
                 if response.ok:
                     self.logger.info(
-                        f"t-{thread_id}: {response.status_code} - {response.elapsed}")
+                        f"t-{thread_id}: {response.status_code} - {len(result)} - {response.elapsed}")
                 else:
                     self.logger.error(f"t-{thread_id}: {response.status_code} - {response.elapsed}"
                                       f"\n{response.text}\n")
 
                 time.sleep(self.sleepsec)
-                result = response.json()['data']
                 return result
 
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as err:
@@ -318,21 +324,33 @@ class Pushpull:
                 time.sleep(1)
                 futures.append(executor.submit(self._make_request_from_timeframe,
                                                mode=mode, params=thread_params, thread_id=i))
+
+            lp = 0
             for future in as_completed(futures):
+                lp += 1
                 # futures.as_completed will hold the main thread until complete
                 response, thread_id = future.result()
                 if sort == 'desc':
-                    responses[len(responses) - 1 - thread_id] = response
-                else:  # 'asc'
-                    responses.reverse()
+                    responses[self.threads - thread_id] = response
+                elif sort == 'asc':
+                    response.reverse()
                     responses[thread_id] = response
+                else:
+                    raise Exception(f'Unexpected value for `sort`: {sort}')
 
         # de-nest the response
-        responses = [post for batch in responses for post in batch]
+        denested_responses = list()
+        for i, batch in enumerate(responses):
+            if batch is None:
+                self.logger.error(f'empty response for batch no.{i}! - possible omitted JSON data')
+            else:
+                denested_responses.extend(batch)
+
+        # denested_responses = [post for batch in responses for post in batch]
 
         self.logger.info(f'{mode} fetching time: {time.time() - s}sec')
 
-        return responses
+        return denested_responses
 
     #########
     # Utils #
@@ -548,7 +566,7 @@ class Pushpull:
                     # if (the last id) > (first id from second request) then start from (the last id)
 
             except KeyError as err:
-                with open("errfile.json", "w", encoding='utf-8') as f:
+                with open(os.path.join(self.cwd, "err_dump.json"), "w", encoding='utf-8') as f:
                     json.dump(result, f, indent=4)
                 raise Exception(f't-{thread_id}: date format problem from submission. (dumped file):\n{err}')
 
@@ -557,17 +575,21 @@ class Pushpull:
 
 if __name__ == '__main__':
     # example code
-    pp = Pushpull(sleepsec=3, threads=4)
+    pp = Pushpull(sleepsec=3, threads=4, cwd='../tests')
 
     # res = pp.get_submissions(after=datetime(2024, 1, 1), before=datetime(2024, 1, 2),
     #                         subreddit='bluearchive', get_comments=True, duplicate_action='keep_original', sort='desc')
     # ['newest', 'oldest', 'remove', 'keep_original', 'keep_removed']
+
+    '''
     filters = ['title', 'id']
     res = pp.get_submissions(
         after=datetime(2024, 1, 1), before=datetime(2024, 1, 1, 3),
         subreddit='bluearchive', duplicate_action='keep_original', sort='desc', get_comments=True,
         filters=filters
-    )
+    )'''
+    res = pp.get_submissions(after=datetime(2024, 1, 2), before=datetime(2024, 1, 3),
+                             subreddit='bluearchive', sort='asc', get_comments=False)
 
-    with open("example.json", "w", encoding='utf-8') as outfile:
+    with open("../tests/main_example.json", "w", encoding='utf-8') as outfile:
         json.dump(res, outfile, indent=4)
