@@ -325,13 +325,11 @@ class Pushpull:
                 futures.append(executor.submit(self._make_request_from_timeframe,
                                                mode=mode, params=thread_params, thread_id=i))
 
-            lp = 0
             for future in as_completed(futures):
-                lp += 1
                 # futures.as_completed will hold the main thread until complete
                 response, thread_id = future.result()
                 if sort == 'desc':
-                    responses[self.threads - thread_id] = response
+                    responses[self.threads - 1 - thread_id] = response
                 elif sort == 'asc':
                     response.reverse()
                     responses[thread_id] = response
@@ -402,16 +400,17 @@ class Pushpull:
                         if self.is_deleted(post):
                             indexed[link_id] = post  # default keeping the newest deleted version for no
                 case _:
-                    raise Exception(f'invalid parameter for `duplicate_action`: {duplicate_action}')
+                    raise Exception(f'invalid parameter for `duplicate_action`: '
+                                    f"should be one of ['newest', 'oldest', 'remove', 'keep_original', 'keep_removed']")
 
         # delete all the submission/comment that has placeholders remaining
         del_list = list()
         for k, v in indexed.items():
-            if type(v) is not dict:
+            if v == 'dupe':
                 del_list.append(k)
         for k in del_list:
             if k in del_list:
-                logging.warning(f'deleting {k}!!! failed `is_deleted` detection. [Temporary]')
+                self.logger.warning(f'failed `is_deleted` detection. deleting {k} from results!')
                 del indexed[k]
 
         """
@@ -575,21 +574,10 @@ class Pushpull:
 
 if __name__ == '__main__':
     # example code
-    pp = Pushpull(sleepsec=3, threads=4, cwd='../tests')
+    pp = Pushpull(sleepsec=3, threads=4, cwd='../results')
 
-    # res = pp.get_submissions(after=datetime(2024, 1, 1), before=datetime(2024, 1, 2),
-    #                         subreddit='bluearchive', get_comments=True, duplicate_action='keep_original', sort='desc')
-    # ['newest', 'oldest', 'remove', 'keep_original', 'keep_removed']
+    res = pp.get_submissions(after=datetime(2024, 1, 1), before=datetime(2024, 1, 2),
+                             subreddit='bluearchive', get_comments=True, duplicate_action='keep_original')
 
-    '''
-    filters = ['title', 'id']
-    res = pp.get_submissions(
-        after=datetime(2024, 1, 1), before=datetime(2024, 1, 1, 3),
-        subreddit='bluearchive', duplicate_action='keep_original', sort='desc', get_comments=True,
-        filters=filters
-    )'''
-    res = pp.get_submissions(after=datetime(2024, 1, 2), before=datetime(2024, 1, 3),
-                             subreddit='bluearchive', sort='asc', get_comments=False)
-
-    with open("../tests/main_example.json", "w", encoding='utf-8') as outfile:
+    with open("../results/main_example.json", "w", encoding='utf-8') as outfile:
         json.dump(res, outfile, indent=4)
