@@ -114,7 +114,7 @@ class Pushpull:
                         locked: bool = None,
                         stickied: bool = None,
                         spoiler: bool = None,
-                        contest_mode: bool = None):
+                        contest_mode: bool = None) -> dict:
 
         if after and before:
             assert isinstance(after, datetime) and isinstance(before, datetime), \
@@ -214,7 +214,7 @@ class Pushpull:
                      sort_type='created_utc',
                      author=None,
                      subreddit=None,
-                     link_id=None):
+                     link_id=None) -> dict:
 
         if after and before:
             assert isinstance(after, datetime) and isinstance(before, datetime), \
