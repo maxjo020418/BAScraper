@@ -142,6 +142,8 @@ class Pushpull:
             'spoiler': pb(spoiler),
             'contest_mode': pb(contest_mode),
         }
+        # remove empty param values
+        params = {k: v for k, v in params.items() if v}
 
         # check params
         check_result = self._check_params(**params)
@@ -429,7 +431,7 @@ class Pushpull:
 
         return indexed, dupes
 
-    def _check_params(self, **parameters):
+    def _check_params(self, **parameters) -> str:
         for k, v in parameters.items():
             if not v:  # ignore for None values
                 continue
@@ -448,21 +450,23 @@ class Pushpull:
                         self.logger.warning('size based fetching is not yet supported')
                         return 'size-mode'
 
-
         if (st := parameters['sort_type']) and st != 'created_utc' and parameters['size'] > 100:
             self.logger.warning(f"the sort type: `{st}` doesn't support fetching more than 100 results. "
                                 f"if needed, filter/sort the result from a specified timeframe "
                                 f"with sort_type: `created_utc`")
+
             return 'single-mode'
 
-        if parameters['after'] and parameters['before']:
+        if ('after' in parameters) and ('before' in parameters):
             assert parameters['after'] <= parameters['before'], "'after' cannot be bigger than 'before'!"
             if (p := parameters['sort_type']) != 'created_utc':
                 self.logger.warning(
                     f'sort_type: <{p}> is not supported while using the `after` and `before` parameters')
                 parameters['sort_type'] = 'created_utc'
 
-        return 'timeframe-mode'
+            return 'timeframe-mode'
+
+        return 'single-mode'
 
     @staticmethod
     def is_deleted(json_obj) -> bool:
@@ -579,5 +583,5 @@ if __name__ == '__main__':
     res = pp.get_submissions(after=datetime(2024, 1, 1), before=datetime(2024, 1, 2),
                              subreddit='bluearchive', get_comments=True, duplicate_action='keep_original')
 
-    with open("../results/main_example.json", "w", encoding='utf-8') as outfile:
+    with open("../results/data.json", "w", encoding='utf-8') as outfile:
         json.dump(res, outfile, indent=4)
