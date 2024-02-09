@@ -1,4 +1,6 @@
 # run `python -m build` to build
+# `twine check dist/*` to verify
+# `twine upload dist/*` to upload
 # check https://blog.ganssle.io/articles/2021/10/setup-py-deprecated.html#summary for details
 
 from setuptools import setup, find_packages
