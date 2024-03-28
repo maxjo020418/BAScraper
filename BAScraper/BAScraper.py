@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Queue
 
 import os
-from threading import Lock
+from threading import Lock, RLock
 import pprint
 pretty = pprint.PrettyPrinter(indent=4).pprint
 
@@ -34,18 +34,42 @@ class Pushpull:
                  backoffsec=3,
                  max_retries=5,
                  timeout=10,
-                 threads=4,
+                 threads=2,
                  comment_t=None,
                  batch_size=0,
                  log_level='INFO',
-                 cwd=os.getcwd()):
+                 cwd=os.getcwd(),
+                 pace_mode='auto-hard'):
 
         """
         might add these params from pmaw
         mem_safe (boolean, optional): If True, stores responses in cache during operation, defaults to False
         safe_exit (boolean, optional): If True, will safely exit if interrupted by storing current responses
         and requests in the cache. Will also load previous requests / responses if found in cache, defaults to False
+
+        ! new ratelimit -> 30 requests per 60 seconds = 3 requests per second ->
+        soft limit starting from 15 requests per second (1.5 requests per second)
+        hard limit starting from 30 requests per second (3 requests per second)
+        hard limit starting from 1k requests per hour (1 request every 4 second)
         """
+
+        # variables for managing rate limits
+        # rate limit as of feb 9th 2023
+        assert pace_mode in ['auto-soft', 'auto-hard', 'manual']
+        self.max_pool_amount_soft = 15
+        self.max_pool_amount_hard = 30
+        self.refill_second = 60
+        self.last_refilled = time.time()
+        self.pace_mode = pace_mode  # auto by default
+        if pace_mode == 'auto-soft':
+            self.max_pool_amount = self.max_pool_amount_soft
+        elif pace_mode == 'auto-hard':
+            self.max_pool_amount = self.max_pool_amount_hard
+        self.pool_amount = self.max_pool_amount
+        self.throttling = False  # needed this since the threads can't get out of throttled state
+        # (needs shared throttled/not-throttled state)
+        self.pool_lock = RLock()
+        self.throttle_lock = RLock()
 
         self.sleepsec = sleepsec  # cooldown per request
         self.backoffsec = backoffsec  # backoff amount after error happens in request
@@ -59,10 +83,6 @@ class Pushpull:
         self.comment_url = 'https://api.pullpush.io/reddit/search/comment/'
 
         self.cwd = cwd
-
-        # Rlocks are no longer used for now
-        # self.print_lock = RLock()
-        self.file_lock = Lock()
 
         # google custom search engine creds
         try:
@@ -89,6 +109,47 @@ class Pushpull:
         ch.setLevel(log_level)  # CHANGE HERE TO CONTROL DISPLAYED LOG MESSAGE LEVEL
         ch.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
         self.logger.addHandler(ch)
+
+    def request_sleep(self, thread_no=None, sleepsec=None):
+        sleepsec = self.sleepsec if sleepsec is None else sleepsec
+
+        match self.pace_mode:
+            case 'auto-soft' | 'auto-hard':
+                self.pool_lock.acquire()
+                if time.time() - self.last_refilled > self.refill_second:
+                    self.pool_amount = self.max_pool_amount
+                    self.last_refilled = time.time()
+                    self.logger.info(f't-{thread_no}: pool refilled!')
+
+                if self.pool_amount > 0:
+                    time.sleep(sleepsec)
+                    self.pool_amount -= 1
+                    self.pool_lock.release()
+                    return
+
+                else:
+                    self.pool_lock.release()
+                    with self.throttle_lock:
+                        self.throttling = True
+                        s = self.refill_second - (time.time() - self.last_refilled)
+                        self.logger.info(f't-{thread_no}: soft/hard limit reached! throttling for {s}...')
+                        self.logger.info(f'sleeping for {s}sec')
+                        time.sleep(s)
+                        '''
+                        while True:
+                            if (time.time() - self.last_refilled > self.refill_second) or not self.throttling:
+                                self.throttling = False
+                                break
+                            time.sleep(1)
+                        '''
+                    self.request_sleep(thread_no)
+
+            case 'manual':
+                time.sleep(sleepsec)
+                return
+
+            case _:
+                raise Exception(f'{thread_no}: Wrong variable for `mode`!')
 
     # TODO: make it so that when `ids` field is used,
     #  try to use `_make_request_from_queued_id` function for large batches
@@ -276,30 +337,32 @@ class Pushpull:
                     params['after'] = params['after']-1
 
                 response = requests.get(url, params=params, headers=headers, timeout=self.timeout)
-
                 result = response.json()['data']
 
                 if response.ok:
-                    self.logger.info(
-                        f"t-{thread_id}: {response.status_code} - {len(result)} - {response.elapsed}")
+                    with self.pool_lock:
+                        self.logger.info(
+                            f"t-{thread_id}: pool: {self.pool_amount} | len: {len(result)} | time: {response.elapsed}")
                 else:
                     self.logger.error(f"t-{thread_id}: {response.status_code} - {response.elapsed}"
                                       f"\n{response.text}\n")
 
-                time.sleep(self.sleepsec)
+                self.request_sleep(thread_id)
                 return result
 
-            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as err:
+            except (requests.exceptions.Timeout,
+                    requests.exceptions.ConnectionError,
+                    requests.exceptions.HTTPError) as err:
                 retries += 1
                 self.logger.warning(
                     f"t-{thread_id}: {err}\nRetrying... Attempt {retries}/{self.max_retries}")
-                time.sleep(self.backoffsec * retries)  # backoff
+                self.request_sleep(thread_id, self.backoffsec * retries)  # backoff
 
             except json.decoder.JSONDecodeError:
                 retries += 1
                 self.logger.warning(
                     f"t-{thread_id}: JSONDecodeError: Retrying... Attempt {retries}/{self.max_retries}")
-                time.sleep(self.backoffsec * retries)  # backoff
+                self.request_sleep(thread_id, self.backoffsec * retries)  # backoff
 
             except Exception as err:
                 raise Exception(f't-{thread_id}: unexpected error: {err}')
@@ -406,14 +469,10 @@ class Pushpull:
                                     f"should be one of ['newest', 'oldest', 'remove', 'keep_original', 'keep_removed']")
 
         # delete all the submission/comment that has placeholders remaining
-        del_list = list()
-        for k, v in indexed.items():
-            if v == 'dupe':
-                del_list.append(k)
-        for k in del_list:
-            if k in del_list:
-                self.logger.warning(f'failed `is_deleted` detection. deleting {k} from results!')
-                del indexed[k]
+        def alert_dupe(k):
+            self.logger.warning(f'failed `is_deleted` detection. deleting {k} from results!')
+            return k
+        indexed = {k: v for k, v in indexed.items() if v != alert_dupe('dupe')}
 
         """
         so the is_deleted function sometimes return all the dupes as either all False or True. 

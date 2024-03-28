@@ -10,7 +10,7 @@ BAScraper(Blue Archive Scraper) was initially made and used for the 2023 recap/w
 It's pretty basic but planning to add some more features as it goes.
 It uses multithreading to make requests to the PullPush.io endpoint and returns the result as a JSON(dict) object.
 
-currently it can:
+**currently it can:**
 - get submissions/comments from a certain subreddit in supported order/sorting methods specified in the PullPush.io API docs
 - get comments under the retrieved submissions
 - can get all the submissions based on the number of submissions or in a certain timeframe you specify
@@ -21,6 +21,15 @@ which I am planning to release it with this or separately after some polishing.
 
 Also, please ask the PullPush.io owner before making large amounts or request and also respect cool-down times. 
 It stresses the server and can cause inconvenience for everyone.
+
+> ⚠️ **As of Feb. 2024, PullPush API implemented ratelimiting!**<br>
+> soft limit will occur after 15 req/min and hard limit after 30 req/min. There's also a long-term (hard) limit of 1000 req/hr.<br><br>
+> **Recommended request pacing:**
+> - to prevent soft-limit: 4 sec sleep per request
+> - to prevent hard-limit: 2 sec sleep per request
+> - for 1000+ requests: 3.6 ~ 4 sec sleep per request
+> 
+> rate limiting will automatically pace your reqeust's response time to meet the following hard limits. Hence making the `pace_mode` parameter kinda useless (it was made before proper API sice pacing was made). Following the pacing time above is recommended.
 
 ## basic usage & requirements
 you can install the package via pip
@@ -55,11 +64,12 @@ all parameters are optional
 | backoffsec  | `int`         | backoff time for each failed request                                                               | 3                                 |
 | max_retries | `int`         | number of retries for failed requests before it gives up                                           | 5                                 |
 | timeout     | `int`         | time until it's considered as timout err                                                           | 10                                |
-| threads     | `int`         | no. of threads when multithreading is used                                                         | 4                                 |
+| threads     | `int`         | no. of threads when multithreading is used                                                         | 2                                 |
 | comment_t   | `int`         | no. of threads used for comment fetching, defaults to `threads`                                    |                                   |
 | batch_size  | `int`         | not implemented yet                                                                                |                                   |
 | log_level   | `str`         | log level in which is displayed on the console, should be a string representation of logging level | `INFO`                            |
 | cwd         | `str`         | dir path where all the log files and JSON file will be stored                                      | `os.getcwd()` (current directory) |
+| pace_mode   | `str`         | one of `auto-soft`, `auto-hard`, `manual`. sets the pace to mitigate rate-limiting. (mostly meaningless) | `auto-hard`                 |
 
 ## `Pushpull.get_submissions` & `Pushpull.get_comments`
 all parameters are optional
