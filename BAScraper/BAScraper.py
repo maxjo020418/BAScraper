@@ -2,6 +2,7 @@ import requests
 import time
 import logging
 import json
+import re
 
 from dataclasses import dataclass
 from typing import List
@@ -469,10 +470,13 @@ class Pushpull:
                                     f"should be one of ['newest', 'oldest', 'remove', 'keep_original', 'keep_removed']")
 
         # delete all the submission/comment that has placeholders remaining
-        def alert_dupe(k):
-            self.logger.warning(f'failed `is_deleted` detection. deleting {k} from results!')
-            return k
-        indexed = {k: v for k, v in indexed.items() if v != alert_dupe('dupe')}
+        def alert_dupe(item):
+            key, value = item
+            if value == 'dupe':
+                self.logger.warning(f'failed `is_deleted` detection. deleting {key} from results!')
+                return False
+            return True
+        indexed = {k: v for k, v in indexed.items() if alert_dupe((k, v))}
 
         """
         so the is_deleted function sometimes return all the dupes as either all False or True. 
@@ -530,50 +534,35 @@ class Pushpull:
     @staticmethod
     def is_deleted(json_obj) -> bool:
         """
-        :param json_obj: dict obj
-        :return: `bool` if the submission/comment is deleted or not
+        Check if a Reddit submission or comment is deleted.
+        :param json_obj: dict object representing the submission or comment
+        :return: `bool` indicating if the item is deleted or not
+
+        To be deleted the text needs to:
+         - start and end with [ ]
+         - be under 100 chars
+         - contain deleted or removed
+        Examples: '[Deleted By User]' '[removed]' '[Removed by Reddit]'
         """
-        is_topic = json_obj.get('title') is not None
+        if any(json_obj.get(field) is not None for field in ['removed_by_category', 'removal_reason']):
+            return True
+
         author = json_obj.get('author')
-        if author is None:
-            return True
-        if author[0] == '[' and author[-1] == ']':
-            return True
-        if json_obj.get('removed_by_category') is not None:
-            return True
-        if json_obj.get('removal_reason') is not None:
-            return True
-        crc = json_obj.get('collapsed_reason_code')
-        if crc is not None and crc.lower() == 'deleted':
+        if author is None or (author.startswith('[') and author.endswith(']')):
             return True
 
-        if is_topic:
-            text = json_obj.get('selftext')
-        else:
-            text = json_obj.get('body')
+        text_field = 'selftext' if json_obj.get('title') is not None else 'body'
+        text = json_obj.get(text_field, "")
 
-        if text is None:
+        if text == "" and not json_obj.get('title'):
             return True
-        if len(text) == 0:
-            if is_topic:
-                return False
-            else:
-                return True
 
-        # To be deleted the text needs to:
-        # - start and end with [ ]
-        # - be under 100 chars
-        # - contain deleted or removed
-        # Examples: '[ Deleted By User ]' '[removed]' '[ Removed by Reddit ]'
+        # Deleted or removed posts/comments often have specific text markers
+        if re.match(r"\[.*\]", text) and len(text) <= 100 and any(
+                term in text.lower() for term in ['deleted', 'removed']):
+            return True
 
-        if not (text[0] == '[' and text[-1] == ']'):
-            return False
-        if len(text) > 100:
-            return False
-        text = text.lower()
-        if not ('deleted' in text or 'removed' in text):
-            return False
-        return True
+        return False
 
     #######################################
     # worker functions for multithreading #
