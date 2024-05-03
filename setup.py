@@ -5,7 +5,7 @@
 
 from setuptools import setup, find_packages
 
-VERSION = '0.0.4'
+VERSION = '0.0.4.post1'
 DESCRIPTION = 'API wrapper for PullPush.io - the 3rd party replacement API for Reddit.'
 LONG_DESCRIPTION = '''currently it can:
 - get submissions/comments from a certain subreddit in supported order/sorting methods specified in the PullPush.io API docs

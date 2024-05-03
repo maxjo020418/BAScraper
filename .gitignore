@@ -1,5 +1,6 @@
 .env
-./data
-./BAScraper.egg-info
-./dist
-./build
+data
+BAScraper.egg-info
+dist
+build
+.idea
