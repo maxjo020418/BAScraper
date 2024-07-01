@@ -14,6 +14,7 @@ from queue import Queue
 import os
 from threading import Lock, RLock
 import pprint
+import warnings
 pretty = pprint.PrettyPrinter(indent=4).pprint
 
 # imports no longer used
@@ -52,6 +53,15 @@ class Pushpull:
         soft limit starting from 15 requests per second (1.5 requests per second)
         hard limit starting from 30 requests per second (3 requests per second)
         hard limit starting from 1k requests per hour (1 request every 4 second)
+        """
+
+        warnings.warn("Regular (multithreaded) `Pushpull` class might be overhauled/removed "
+                      "in future versions after future cleanup/modifications. "
+                      "Recommended to use `PullPushAsync` from now on.",
+                      FutureWarning)
+        """
+        This might be used again if the GIL stuffs are resolved.
+        stuff might help with preprocessing OTG as it's receiving JSON
         """
 
         # variables for managing rate limits
@@ -160,7 +170,7 @@ class Pushpull:
                         get_comments: bool = False,
                         duplicate_action: str = 'newest',
                         filters: List[str] = None,
-                        sort: str = 'desc',
+                         sort: str = 'desc',
                         sort_type: str = 'created_utc',
                         limit: int = 100,
                         ids: List[str] = None,
