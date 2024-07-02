@@ -5,6 +5,10 @@ import time
 import os
 import logging
 from typing import List
+from datetime import datetime
+import json
+
+from .utils import *
 
 
 class PullPushAsync:
@@ -49,7 +53,7 @@ class PullPushAsync:
         self.SUBMISSION_URI = 'https://api.pullpush.io/reddit/search/submission/'
         self.COMMENT_URI = 'https://api.pullpush.io/reddit/search/comment/'
         self.DIAGNOSTIC_URI = "https://api.pullpush.io/ping"
-        # self.last_refilled = time.time()
+        self.last_refilled = time.time()
 
         assert pace_mode in ['auto-soft', 'auto-hard', 'manual']
         self.pace_mode = pace_mode
@@ -143,7 +147,7 @@ class PullPushAsync:
             'contest_mode': [bool, None]
         }
 
-        # setting up the mode
+        # setting up the mode (whether it's for comments or submissions)
         if mode == 'comments':
             scheme = comment_params
             uri_string = self.COMMENT_URI
@@ -176,10 +180,84 @@ class PullPushAsync:
         return uri_string + '?' + '&'.join([f'{k}={param2str(k, v)}' for k, v in params.items()])
 
     def _make_request(self, uri: str) -> defaultdict:
-        pass
+        retries = 0
+        while retries < self.max_retries:
+            try:
+                response = requests.get(uri, timeout=self.timeout)
+                result = response.json()['data']
 
-    def _preprocess_json(self, obj):
-        pass
+                if response.ok:
+                    self.logger.info(
+                        f"pool: {self.pool_amount} | len: {len(result)} | time: {response.elapsed}")
+                else:
+                    self.logger.error(f"{response.status_code} - {response.elapsed}"
+                                      f"\n{response.text}\n")
 
-    def _is_deleted(self, obj):
-        pass
+                self._request_sleep()
+                return result
+
+            except (requests.exceptions.Timeout,
+                    requests.exceptions.ConnectionError,
+                    requests.exceptions.HTTPError) as err:
+                retries += 1
+                self.logger.warning(
+                    f"t-{thread_id}: {err}\nRetrying... Attempt {retries}/{self.max_retries}")
+                self._request_sleep(thread_id, self.backoffsec * retries)  # backoff
+
+            except json.decoder.JSONDecodeError:
+                retries += 1
+                self.logger.warning(
+                    f"JSONDecodeError: Retrying... Attempt {retries}/{self.max_retries}")
+                self._request_sleep(thread_id, self.backoffsec * retries)  # backoff
+
+            except Exception as err:
+                raise Exception(f'unexpected error: \n{err}')
+
+        self.logger.error(f'failed request attempt. skipping...')
+        return list()
+
+    def _request_sleep(self, sleep_sec=None):
+        # in case of manual override
+        sleep_sec = self.sleep_sec if sleep_sec is None else sleep_sec
+
+        match self.pace_mode:
+            case 'auto-hard':
+                if time.time() - self.last_refilled > self.REFILL_SECOND:
+                    self.pool_amount = self.MAX_POOL_HARD
+                    self.last_refilled = time.time()
+                    self.logger.info(f'pool refilled!')
+
+                if self.pool_amount > 0:
+                    time.sleep(sleep_sec)
+                    self.pool_amount -= 1
+                    return
+                else:
+                    self.logger.info(f't-{thread_no}: hard limit reached! throttling for {s}...')
+                    self.logger.info(f'sleeping for {s}sec')
+                    time.sleep(s)
+                    self.request_sleep()
+
+            case 'auto-soft':
+                if time.time() - self.last_refilled > self.REFILL_SECOND:
+                    self.pool_amount = self.MAX_POOL_SOFT
+                    self.last_refilled = time.time()
+                    self.logger.info(f'pool refilled!')
+
+                if self.pool_amount > 0:
+                    time.sleep(sleep_sec)
+                    self.pool_amount -= 1
+                    return
+                else:
+                    self.logger.info(f't-{thread_no}: soft limit reached! throttling for {s}...')
+                    self.logger.info(f'sleeping for {s}sec')
+                    time.sleep(s)
+                    self.request_sleep()
+
+
+            case 'manual':
+                time.sleep(sleep_sec)
+                return
+
+            case _:
+                raise Exception(f'{thread_no}: Wrong variable for `mode`!')
+
