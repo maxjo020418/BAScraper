@@ -1,1 +1,1 @@
-from .BAScraper import *
+from . import *

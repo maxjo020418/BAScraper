@@ -1,11 +1,9 @@
 import requests
 from collections import defaultdict
-import re
 import time
 import os
 import logging
-from typing import List
-from datetime import datetime
+from typing import Union
 import json
 
 from .utils import *
@@ -44,7 +42,9 @@ class PullPushAsync:
             for keep_removed, it'll find the deleted version. (get the deleted/removed version)
             for removed, it'll just exclude it from the results. (remove altogether)
         """
-        self.last_refilled = time.time()
+
+        # declaring service type, for all pre-configured variables and params
+        self.SERVICE = Params.PullPush
 
         assert pace_mode in ['auto-soft', 'auto-hard', 'manual']
         self.pace_mode = pace_mode
@@ -82,87 +82,11 @@ class PullPushAsync:
         ch.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
         self.logger.addHandler(ch)
 
+        # start timer for API pool refill
+        self.last_refilled = time.time()
+
     def get_submissions(self, **params):
         pass
 
     def get_comments(self, **params):
         pass
-
-    def _make_request(self, uri: str) -> defaultdict:
-        retries = 0
-        while retries < self.max_retries:
-            try:
-                response = requests.get(uri, timeout=self.timeout)
-                result = response.json()['data']
-
-                if response.ok:
-                    self.logger.info(
-                        f"pool: {self.pool_amount} | len: {len(result)} | time: {response.elapsed}")
-                else:
-                    self.logger.error(f"{response.status_code} - {response.elapsed}"
-                                      f"\n{response.text}\n")
-
-                self._request_sleep()
-                return result
-
-            except (requests.exceptions.Timeout,
-                    requests.exceptions.ConnectionError,
-                    requests.exceptions.HTTPError) as err:
-                retries += 1
-                self.logger.warning(
-                    f"{err}\nRetrying... Attempt {retries}/{self.max_retries}")
-                self._request_sleep(self.backoff_sec * retries)  # backoff
-
-            except json.decoder.JSONDecodeError:
-                retries += 1
-                self.logger.warning(
-                    f"JSONDecodeError: Retrying... Attempt {retries}/{self.max_retries}")
-                self._request_sleep(self.backoff_sec * retries)  # backoff
-
-            except Exception as err:
-                raise Exception(f'unexpected error: \n{err}')
-
-        self.logger.error(f'failed request attempt. skipping...')
-        return list()
-
-    def _request_sleep(self, sleep_sec=None):
-        # in case of manual override
-        sleep_sec = self.sleep_sec if sleep_sec is None else sleep_sec
-
-        if time.time() - self.last_refilled > self.REFILL_SECOND:
-            self.pool_amount = self.MAX_POOL_SOFT
-            self.last_refilled = time.time()
-            self.logger.info(f'pool refilled!')
-
-        match self.pace_mode:
-            case 'auto-hard' | 'auto-soft':
-                if time.time() - self.last_refilled > self.REFILL_SECOND:
-
-                    match self.pace_mode:
-                        case 'auto-hard':
-                            self.pool_amount = self.MAX_POOL_HARD
-
-                        case 'auto-soft':
-                            self.pool_amount = self.MAX_POOL_SOFT
-
-                    self.last_refilled = time.time()
-                    self.logger.info(f'pool refilled!')
-
-                if self.pool_amount > 0:
-                    time.sleep(sleep_sec)
-                    self.pool_amount -= 1
-                    return
-                else:
-                    s = self.REFILL_SECOND - (time.time() - self.last_refilled)
-                    self.logger.info(f'hard limit reached! throttling for {s}...')
-                    self.logger.info(f'sleeping for {s}sec')
-                    time.sleep(s)
-                    self._request_sleep()
-
-            case 'manual':
-                time.sleep(sleep_sec)
-                return
-
-            case _:
-                raise Exception(f' Wrong variable for `mode`!')
-
