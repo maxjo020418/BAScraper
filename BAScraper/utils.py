@@ -1,10 +1,12 @@
 from dataclasses import dataclass
-from typing import List
+from typing import TYPE_CHECKING, Union, List
 import re
-from typing import Union
 import requests
 import json
 import time
+
+if TYPE_CHECKING:  # prevent circular imports
+    from BAScraper.BAScraper_async import PullPushAsync
 
 
 class Params:
@@ -72,7 +74,7 @@ class Params:
 
 
 def process_params(service: Union["Params.PullPush", "Params.Arctic"],
-                   mode, **params) -> str:
+                   mode: str, **params) -> str:
     """
     :param service: type of service the processing will be based on
     :param mode: mode as in whether it's for comments or submissions
@@ -83,9 +85,6 @@ def process_params(service: Union["Params.PullPush", "Params.Arctic"],
 
     TODO: I forgot what the endpoint did when it had no params...
     """
-    def assert_op(val: str) -> bool:
-        pattern = r"^(<|>)\d+$"
-        return True if re.match(pattern, val) else False
 
     # setting up the mode (whether it's for comments or submissions)
     if mode == 'comments':
@@ -120,7 +119,14 @@ def process_params(service: Union["Params.PullPush", "Params.Arctic"],
     return uri_string + '?' + '&'.join([f'{k}={param2str(k, v)}' for k, v in params.items()])
 
 
-def make_request(service, uri: str) -> list:
+async def make_request(service: Union["PullPushAsync", ], uri: str) -> list:
+    """
+    :param service:
+        `PullPushAsync` or other top level object for `BAScraper` (`ArcticAsync` is planned).
+        will get all the user parameters(`sleepsec`, `retries`, etc.) from that object.
+    :param uri: uri string from `process_params` (or can be used manually)
+    :return: list of dict containing each submission/comments
+    """
     retries = 0
     while retries < service.max_retries:
         try:
@@ -131,10 +137,10 @@ def make_request(service, uri: str) -> list:
                 service.logger.info(
                     f"pool: {service.pool_amount} | len: {len(result)} | time: {response.elapsed}")
             else:
-                service.logger.error(f"{response.status_code} - {response.elapsed}"
-                                  f"\n{response.text}\n")
+                service.logger.error(f"{response.status_code} - {response.elapsed}" 
+                                     f"\n{response.text}\n")
 
-            _request_sleep()
+            _request_sleep(service)
             return result
 
         except (requests.exceptions.Timeout,
@@ -143,13 +149,13 @@ def make_request(service, uri: str) -> list:
             retries += 1
             service.logger.warning(
                 f"{err}\nRetrying... Attempt {retries}/{service.max_retries}")
-            _request_sleep(service.backoff_sec * retries)  # backoff
+            _request_sleep(service, service.backoff_sec * retries)  # backoff
 
         except json.decoder.JSONDecodeError:
             retries += 1
             service.logger.warning(
-                f"JSONDecodeError: Retrying... Attempt {retries}/{service.max_retries}")
-            _request_sleep(service.backoff_sec * retries)  # backoff
+                f"JSONDecodeError: Possible malformed response. Retrying... Attempt {retries}/{service.max_retries}")
+            _request_sleep(service, service.backoff_sec * retries)  # backoff
 
         except Exception as err:
             raise Exception(f'unexpected error: \n{err}')
@@ -158,7 +164,7 @@ def make_request(service, uri: str) -> list:
     return list()
 
 
-def _request_sleep(service, sleep_sec=None) -> None:
+def _request_sleep(service: Union["PullPushAsync", ], sleep_sec: float = None) -> None:
     # in case of manual override
     sleep_sec = service.sleep_sec if sleep_sec is None else sleep_sec
 
@@ -197,14 +203,86 @@ def _request_sleep(service, sleep_sec=None) -> None:
             return
 
         case _:
-            raise Exception(f' Wrong variable for `mode`!')
+            raise Exception(f'Wrong variable for `mode`!')
 
 
-def _preprocess_json(obj):
-    pass
+def preprocess_json(service: Union["PullPushAsync", ], obj: List[dict]) -> dict:
+    """
+    :param service:
+    :param obj:
+    :return: JSON(dict) indexed by the submission/comment ID
+    """
+
+    indexed = dict()
+    for elem in obj:
+        elem_id = elem['id']
+        if elem_id not in indexed:  # new entry
+            indexed[elem_id] = elem
+        else:  # possible duplicate
+            match service.duplicate_action:
+                case 'keep_newest':
+                    indexed[elem_id] = elem  # keep the last entry
+
+                case 'keep_oldest':
+                    pass  # keep the first entry
+
+                case 'remove':
+                    # putting a 'remove' flag for later removal
+                    indexed[elem_id] = 'remove'
+
+                case 'keep_original':
+                    # essentially indexed_deleted is same as 'was the previous duplicate element a deleted one?'
+                    indexed_deleted = _is_deleted(indexed[elem_id]) if indexed[elem_id] != 'remove' else True
+                    curr_deleted = _is_deleted(elem)
+
+                    if indexed_deleted and curr_deleted:
+                        indexed[elem_id] = 'remove'
+                    elif indexed_deleted and not curr_deleted:
+                        indexed[elem_id] = elem
+                    elif not indexed_deleted and curr_deleted:
+                        pass
+                    else:  # both not deleted
+                        # service.logger.warning('multiple non-deleted duplicate versions exist! '
+                        #                        'preserving newest non-deleted version.')
+                        indexed[elem_id] = elem
+
+                case 'keep_removed':
+                    # essentially indexed_deleted is same as 'was the previous duplicate element a deleted one?'
+                    indexed_deleted = _is_deleted(indexed[elem_id]) if indexed[elem_id] != 'remove' else False
+                    curr_deleted = _is_deleted(elem)
+
+                    if indexed_deleted and curr_deleted:
+                        # service.logger.warning('multiple deleted duplicate versions exist! '
+                        #                        'preserving newest deleted version.')
+                        indexed[elem_id] = elem
+                    elif indexed_deleted and not curr_deleted:
+                        pass
+                    elif not indexed_deleted and curr_deleted:
+                        indexed[elem_id] = elem
+                    else:  # both not deleted
+                        indexed[elem_id] = 'remove'
+
+                case _:
+                    service.logger.warning('wrong `duplicate_action` reverting to default `keep_newest`')
+                    indexed[elem_id] = elem  # keep the last entry
+
+    if service.duplicate_action in ['keep_removed', 'keep_original', 'remove']:
+        original_count = len(indexed)
+        indexed = {k: v for k, v in indexed.items() if v != 'remove'}
+        del_count = original_count - len(indexed)
+
+        match service.duplicate_action:
+            case 'keep_removed' | 'keep_original':
+                service.logger.warning(f'{del_count} entry/entries have been removed due to '
+                                       f'deletion check failure.') \
+                    if del_count > 0 else None
+            case 'removed':
+                service.logger.info(f'{del_count} dupe entries removed.')
+
+    return indexed
 
 
-def _is_deleted(obj) -> bool:
+def _is_deleted(obj: dict) -> bool:
     """
     Check if a Reddit submission or comment is deleted.
     :param obj: dict object representing the submission or comment
@@ -213,9 +291,16 @@ def _is_deleted(obj) -> bool:
     To be deleted the text needs to:
      - start and end with [ ]
      - be under 100 chars
-     - contain deleted or removed
-    Examples: '[Deleted By User]' '[removed]' '[Removed by Reddit]'
+     - contain deleted or removed text marker
+        Examples: '[Deleted By User]' '[removed]' '[Removed by Reddit]'
     """
+    # parameter for debug/testing
+    debug_delete = obj.get('deleted')
+    if debug_delete is True:
+        return True
+    elif debug_delete is False:
+        return False
+
     if any(obj.get(field) is not None for field in ['removed_by_category', 'removal_reason']):
         return True
 
@@ -229,15 +314,15 @@ def _is_deleted(obj) -> bool:
     if text == "" and not obj.get('title'):
         return True
 
-    # Deleted or removed posts/comments often have specific text markers
+    # Deleted or removed posts/comments often have specific text markers: eg) [Removed by Reddit], [deleted]
     if re.match(r"\[.*]", text) and len(text) <= 100 and any(
             term in text.lower() for term in ['deleted', 'removed']):
         return True
 
     return False
 
-@staticmethod
-def _split_range(epoch_low: int, epoch_high: int, n: int) -> List[list]:
+
+def split_range(epoch_low: int, epoch_high: int, n: int) -> List[list]:
     segment_size = (epoch_high - epoch_low + 1) // n
     remainder = (epoch_high - epoch_low + 1) % n
 

@@ -1,13 +1,15 @@
 import unittest
 from datetime import datetime, timedelta
-from BAScraper.BAScraper_async import PullPushAsync
+from BAScraper import utils
 
 
 def datetime_to_epoch(dt):
     return int(dt.timestamp())
 
+
 def epoch_to_datetime(epoch):
     return datetime.fromtimestamp(epoch)
+
 
 class TestSplitRange(unittest.TestCase):
 
@@ -22,7 +24,7 @@ class TestSplitRange(unittest.TestCase):
 
         # Split the range into 3 parts
         n = 3
-        result = PullPushAsync._split_range(low, high, n)
+        result = utils.split_range(low, high, n)
 
         # Convert epoch ranges back to datetime and print them
         date_ranges = [[epoch_to_datetime(r[0]), epoch_to_datetime(r[1])] for r in result]
@@ -36,6 +38,7 @@ class TestSplitRange(unittest.TestCase):
 
         print(f'{start_date} ~ {end_date} : {n} split')
         [print(date_range, '\t', date_range[1] - date_range[0]) for date_range in date_ranges]
+        print(result)
 
         # Validate the results
         a = date_ranges[0][1] - date_ranges[0][0]
@@ -50,6 +53,7 @@ class TestSplitRange(unittest.TestCase):
             self.assertAlmostEqual(date_ranges[i][0], expected_ranges[i][0], delta=timedelta(seconds=2))
             self.assertAlmostEqual(date_ranges[i][1], expected_ranges[i][1], delta=timedelta(seconds=2))
         '''
+
 
 if __name__ == "__main__":
     unittest.main()

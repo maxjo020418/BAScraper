@@ -1,22 +1,20 @@
-import requests
-from collections import defaultdict
-import time
 import os
 import logging
-from typing import Union
-import json
+import asyncio
 
-from .utils import *
+from BAScraper.utils import *
 
 
 class PullPushAsync:
     def __init__(self,
                  sleep_sec: float = 1,
                  backoff_sec: float = 3,
-                 max_retries: float = 5,
+                 max_retries: int = 5,
                  timeout: float = 10,
                  pace_mode: str = 'auto-hard',
                  cwd=os.getcwd(),
+                 save_dir=os.getcwd(),
+                 task_num=3,
                  log_stream_level: str = 'INFO',
                  log_level: str = 'DEBUG',
                  duplicate_action: str = 'keep_newest',
@@ -38,9 +36,9 @@ class PullPushAsync:
         sleep until the pool is filled back up (controlled by REFILL_SECOND)
 
         for `duplicate_action`, it'll decide what to do with duplicate comments/submissions.
-            for keep_original, it'll find the version before it was removed. (restore if possible)
-            for keep_removed, it'll find the deleted version. (get the deleted/removed version)
-            for removed, it'll just exclude it from the results. (remove altogether)
+        for keep_original, it'll find the version before it was removed. (restore if possible)
+        for keep_removed, it'll find the deleted version. (get the deleted/removed version)
+        for removed, it'll just exclude it from the results. (remove altogether)
         """
 
         # declaring service type, for all pre-configured variables and params
@@ -54,15 +52,18 @@ class PullPushAsync:
             self.max_pool = Params.PullPush.MAX_POOL_HARD
         self.pool_amount = self.max_pool
 
-        assert duplicate_action in ['keep_newest', 'keep_oldest', 'remove', 'keep_original', 'keep_removed'], \
-            ("`duplicate_action` should be one of "
-             "['keep_newest', 'keep_oldest', 'remove', 'keep_original', 'keep_removed']")
-
         self.sleep_sec = sleep_sec
         self.backoff_sec = backoff_sec
         self.max_retries = max_retries
         self.timeout = timeout
         self.cwd = cwd
+        self.save_dir = save_dir
+        self.task_num = task_num
+
+        assert duplicate_action in ['keep_newest', 'keep_oldest', 'remove', 'keep_original', 'keep_removed'], \
+            ("`duplicate_action` should be one of "
+             "['keep_newest', 'keep_oldest', 'remove', 'keep_original', 'keep_removed']")
+        self.duplicate_action = duplicate_action
 
         # logger stuffs
         log_levels = ['NOTSET', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
@@ -75,18 +76,67 @@ class PullPushAsync:
                             filename=os.path.join(self.cwd, 'scrape_log.log'),
                             filemode='w',
                             level=logging.DEBUG)
-
-        # create console logging handler and set level
-        ch = logging.StreamHandler()
-        ch.setLevel(log_stream_level)
-        ch.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
-        self.logger.addHandler(ch)
+        # Add a new handler only if no handlers are present
+        if not self.logger.handlers:
+            # create console logging handler and set level
+            ch = logging.StreamHandler()
+            ch.setLevel(log_stream_level)
+            ch.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
+            self.logger.addHandler(ch)
+        self.logger.propagate = False  # Prevent logging from propagating to the root logger
 
         # start timer for API pool refill
         self.last_refilled = time.time()
 
-    def get_submissions(self, **params):
-        pass
+    async def get_submissions(self, **params) -> Union[None, dict]:
+        """
+        :param params:
 
-    def get_comments(self, **params):
+        will save the results on disk, in the specified dir(`save_dir`).
+
+        if `after` and `before` both exists, it'll get all the stuff in-between
+        if only `after` exists, it'll get the `after` ~> current-time
+        if only `before` exists, it'll only make a single request (100 entries, newest starting from `before`)
+        if neither `after` nor `before` exists, it'll only make a single request (100 entries, newest)
+        """
+        single_request = False
+
+        if 'after' in params and 'before' in params:
+            assert params['after'] < params['before'], '`before` needs to be bigger than `after`'
+        elif 'after' in params and 'before' not in params:
+            assert params['after'] < int(time.time()), '`after` needs to be smaller than current time'
+            params['before'] = int(time.time())
+            self.logger.info(f'only `after` was detected for time parameters, '
+                             f'making requests until current time starting from {params['after']}')
+        elif 'after' not in params and 'before' in params:
+            self.task_num = 1
+            self.logger.info('only `before` was detected for time parameters, making single request')
+            single_request = True
+        else:  # both not in params
+            self.task_num = 1
+            self.logger.info('no time parameter was detected, making single request')
+            single_request = True
+
+        if single_request:
+            uri = process_params(Params.PullPush(), 'submission', **params)
+            res = make_request(self, uri)
+            # save here
+            return
+
+        # segment time is from oldest -> newest
+        segment_ranges = split_range(params['after'], params['before'], self.task_num)
+        uris = list()
+        for segment_range in segment_ranges:
+            params['after'], params['before'] = segment_range
+            uris.append(process_params(Params.PullPush(), 'submission', **params))
+
+        try:
+            async with asyncio.TaskGroup() as tg:
+                tasks = [tg.create_task(make_request(self, uri)) for uri in uris]
+        except Exception as e:
+            print(f"Unhandled exception in TaskGroup: {e}")
+
+        results = preprocess_json(self, [res for task in tasks for res in task.result()])
+
+    async def get_comments(self, **params) -> Union[None, dict]:
         pass
