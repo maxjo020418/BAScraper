@@ -1,6 +1,5 @@
 import os
 import logging
-import asyncio
 
 from BAScraper.utils import *
 
@@ -26,6 +25,8 @@ class PullPushAsync:
         :param timeout: time until it's considered as timout err
         :param pace_mode: methods of pacing to mitigate the ratelimit(pool), auto-hard by default
         :param cwd: path where this will store all the stuffs needed, defaults to cwd
+        :param save_dir: directory to save the results
+        :param task_num: number of async tasks to be made per-segment
         :param log_stream_level: sets the log level for logs streamed on the terminal
         :param log_level: sets the log level for logging (file)
         :param duplicate_action: decides what to do with duplicate entries (usually caused by deletion)
@@ -64,6 +65,8 @@ class PullPushAsync:
             ("`duplicate_action` should be one of "
              "['keep_newest', 'keep_oldest', 'remove', 'keep_original', 'keep_removed']")
         self.duplicate_action = duplicate_action
+
+        # TODO: fix logger(log_stream works) not properly working in async
 
         # logger stuffs
         log_levels = ['NOTSET', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
@@ -118,25 +121,44 @@ class PullPushAsync:
             single_request = True
 
         if single_request:
-            uri = process_params(Params.PullPush(), 'submission', **params)
-            res = make_request(self, uri)
-            # save here
-            return
+            self.logger.debug('Running request in single-coro-mode')
+            result = await make_request(self, 'submissions', **params)
+            # TODO: make and put save-to-disk function here
+            return preprocess_json(self, result)
 
         # segment time is from oldest -> newest
         segment_ranges = split_range(params['after'], params['before'], self.task_num)
-        uris = list()
-        for segment_range in segment_ranges:
-            params['after'], params['before'] = segment_range
-            uris.append(process_params(Params.PullPush(), 'submission', **params))
 
         try:
             async with asyncio.TaskGroup() as tg:
-                tasks = [tg.create_task(make_request(self, uri)) for uri in uris]
-        except Exception as e:
-            print(f"Unhandled exception in TaskGroup: {e}")
+                tasks = list()
+                seg_num = 1
+                for segment in segment_ranges:
+                    params['after'], params['before'] = segment
+                    tasks.append(tg.create_task(make_request_loop(self, 'submissions', **params),
+                                                name=f'coro-{seg_num}'))
+                    seg_num += 1
 
-        results = preprocess_json(self, [res for task in tasks for res in task.result()])
+        # TODO: have to handle errors as ExceptionGroup here. not regular ones
+
+        except asyncio.CancelledError as err:
+            print(f'asyncio.CancelledError: {err}')
+
+        except (KeyboardInterrupt, SystemExit) as err:
+            print('terminated by user or system.')
+
+        except Exception as err:
+            raise err
+
+        else:
+            results = preprocess_json(self, [res for task in tasks for res in task.result()])
+            print(len(results))
+            return results
+
+        finally:
+            pass
+            # TODO: make and put save-to-disk function here
+            # since there may have been exceptions, try to safely save
 
     async def get_comments(self, **params) -> Union[None, dict]:
         pass

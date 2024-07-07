@@ -1,9 +1,13 @@
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Union, List
-import re
-import requests
+import aiohttp
+# import requests
 import json
 import time
+import re
+
+import BAScraper.BAScraper
 
 if TYPE_CHECKING:  # prevent circular imports
     from BAScraper.BAScraper_async import PullPushAsync
@@ -73,8 +77,8 @@ class Params:
         DIAGNOSTIC_URI = ''
 
 
-def process_params(service: Union["Params.PullPush", "Params.Arctic"],
-                   mode: str, **params) -> str:
+def _process_params(service: Union["Params.PullPush", "Params.Arctic"],
+                    mode: str, **params) -> str:
     """
     :param service: type of service the processing will be based on
     :param mode: mode as in whether it's for comments or submissions
@@ -94,7 +98,7 @@ def process_params(service: Union["Params.PullPush", "Params.Arctic"],
         scheme = service.submission_params
         uri_string = service.SUBMISSION_URI
     else:
-        raise Exception('wrong `mode` param for `_process_params`')
+        raise Exception('wrong `mode` param for `process_params`')
 
     # assertion stuffs using the `submission_params` and `comment_params`
     for k, v in params.items():
@@ -119,52 +123,99 @@ def process_params(service: Union["Params.PullPush", "Params.Arctic"],
     return uri_string + '?' + '&'.join([f'{k}={param2str(k, v)}' for k, v in params.items()])
 
 
-async def make_request(service: Union["PullPushAsync", ], uri: str) -> list:
+async def make_request(service: Union["PullPushAsync", ], mode: str, **params) -> List[Union[dict, None]]:
     """
     :param service:
         `PullPushAsync` or other top level object for `BAScraper` (`ArcticAsync` is planned).
         will get all the user parameters(`sleepsec`, `retries`, etc.) from that object.
-    :param uri: uri string from `process_params` (or can be used manually)
+    :param mode:
+    :param params: mode as in whether it's for comments or submissions (or perhaps other)
     :return: list of dict containing each submission/comments
     """
+    coro_name = asyncio.current_task().get_name()
+
+    match service:
+        case _ if isinstance(service, BAScraper.BAScraper_async.PullPushAsync):
+            svc_type = Params.PullPush()
+        case _:
+            raise Exception(f'{type(service)} no such service is supported')
+
+    uri = _process_params(svc_type, mode, **params)
+
     retries = 0
     while retries < service.max_retries:
         try:
-            response = requests.get(uri, timeout=service.timeout)
-            result = response.json()['data']
+            service.logger.debug(f'{coro_name} | request sent!')
+            async with aiohttp.ClientSession() as session:
+                async with session.get(uri, timeout=service.timeout) as response:
+                    response_text = await response.text()
+                    result = await response.json()
+                    result = result['data']
 
-            if response.ok:
-                service.logger.info(
-                    f"pool: {service.pool_amount} | len: {len(result)} | time: {response.elapsed}")
-            else:
-                service.logger.error(f"{response.status_code} - {response.elapsed}" 
-                                     f"\n{response.text}\n")
+                    if response.ok:
+                        # service.logger.info(
+                        service.logger.info(
+                            f"{coro_name} | pool: {service.pool_amount} | len: {len(result)}")
+                    else:
+                        service.logger.error(f"{coro_name} | {response.status}"
+                                             f"\n{response_text}\n")
 
-            _request_sleep(service)
-            return result
+                    await _request_sleep(service)
+                    retries = 0
+                    return result
 
-        except (requests.exceptions.Timeout,
-                requests.exceptions.ConnectionError,
-                requests.exceptions.HTTPError) as err:
+        except (aiohttp.ClientTimeout, aiohttp.ClientConnectionError) as err:
             retries += 1
             service.logger.warning(
-                f"{err}\nRetrying... Attempt {retries}/{service.max_retries}")
-            _request_sleep(service, service.backoff_sec * retries)  # backoff
+                f"{coro_name} | {err}\nRetrying... Attempt {retries}/{service.max_retries}")
+            await _request_sleep(service, service.backoff_sec * retries)  # backoff
 
         except json.decoder.JSONDecodeError:
             retries += 1
             service.logger.warning(
-                f"JSONDecodeError: Possible malformed response. Retrying... Attempt {retries}/{service.max_retries}")
-            _request_sleep(service, service.backoff_sec * retries)  # backoff
+                f"{coro_name} | JSONDecodeError: Possible malformed response. Retrying... "
+                f"Attempt {retries}/{service.max_retries}")
+            await _request_sleep(service, service.backoff_sec * retries)  # backoff
 
         except Exception as err:
-            raise Exception(f'unexpected error: \n{err}')
+            raise Exception(f'{coro_name} | unexpected error: \n{err}')
 
-    service.logger.error(f'failed request attempt. skipping...')
+    service.logger.error(f'{coro_name} | failed request attempt. skipping...')
     return list()
 
 
-def _request_sleep(service: Union["PullPushAsync", ], sleep_sec: float = None) -> None:
+async def make_request_loop(service: Union["PullPushAsync", ], mode: str, **params) -> List[Union[dict, None]]:
+    coro_name = asyncio.current_task().get_name()
+    match service:
+        case _ if isinstance(service, BAScraper.BAScraper_async.PullPushAsync):
+            svc_type = Params.PullPush()
+        case _:
+            raise Exception(f'{type(service)} no such service is supported')
+
+    assert 'after' in params and 'before' in params, \
+        'for `make_request_loop` to work, it needs to have both `after` and `before` in the params'
+
+    res = await make_request(service, mode, **params)
+    final_res = list() + res
+
+    # at least for PullPush the newest result is returned first
+    # due to this, the `after` parameter acts as an anchor point
+    # and the `before` param reverses along headed to the `after`
+    while len(res) > 0 and params['after'] < params['before']:
+        params['before'] = int(res[-1]['created_utc']) - 1
+        service.logger.debug(f'{coro_name} | param info: {params['after']} -> {params['before']}')
+        res = await make_request(service, mode, **params)
+        final_res += res
+
+    service.logger.debug(f'{coro_name} | finished!')
+
+    return final_res
+
+
+# ======== supporting utility functions ========
+
+
+async def _request_sleep(service: Union["PullPushAsync", ], sleep_sec: float = None) -> None:
     # in case of manual override
     sleep_sec = service.sleep_sec if sleep_sec is None else sleep_sec
 
@@ -188,18 +239,18 @@ def _request_sleep(service: Union["PullPushAsync", ], sleep_sec: float = None) -
                 service.logger.info(f'pool refilled!')
 
             if service.pool_amount > 0:
-                time.sleep(sleep_sec)
                 service.pool_amount -= 1
+                await asyncio.sleep(sleep_sec)
                 return
             else:
                 s = service.SERVICE.REFILL_SECOND - (time.time() - service.last_refilled)
                 service.logger.info(f'hard limit reached! throttling for {s}...')
                 service.logger.info(f'sleeping for {s}sec')
                 time.sleep(s)
-                _request_sleep(sleep_sec)
+                await _request_sleep(service, sleep_sec)
 
         case 'manual':
-            time.sleep(sleep_sec)
+            await asyncio.sleep(sleep_sec)
             return
 
         case _:
@@ -334,7 +385,7 @@ def split_range(epoch_low: int, epoch_high: int, n: int) -> List[list]:
         if remainder > 0:
             current_high += 1
             remainder -= 1
-        ranges.append([current_low, current_high])
+        ranges.append([int(current_low), int(current_high)])
         current_low = current_high + 1
 
     return ranges
