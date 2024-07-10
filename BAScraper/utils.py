@@ -1,8 +1,8 @@
-import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Union, List
+from time import perf_counter
+import asyncio
 import aiohttp
-# import requests
 import json
 import time
 import re
@@ -146,17 +146,18 @@ async def make_request(service: Union["PullPushAsync", ], mode: str, **params) -
     while retries < service.max_retries:
         try:
             service.logger.debug(f'{coro_name} | request sent!')
+            tic = perf_counter()
             async with aiohttp.ClientSession() as session:
                 async with session.get(uri, timeout=service.timeout) as response:
-                    response_text = await response.text()
+                    toc = perf_counter()
                     result = await response.json()
                     result = result['data']
 
                     if response.ok:
-                        # service.logger.info(
                         service.logger.info(
-                            f"{coro_name} | pool: {service.pool_amount} | len: {len(result)}")
-                    else:
+                            f"{coro_name} | pool: {service.pool_amount} | len: {len(result)} | time: {round(toc - tic, 2)}")
+                    else:  # in case it doesn't raise an exception but still has errors
+                        response_text = await response.text()
                         service.logger.error(f"{coro_name} | {response.status}"
                                              f"\n{response_text}\n")
 

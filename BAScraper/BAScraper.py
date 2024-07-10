@@ -104,7 +104,7 @@ class Pushpull:
         except (NameError, AttributeError):
             print("no CSE credentials detected. you'll need it to use the Google Custom Search Engine")
 
-        self.logger = logging.getLogger('BAlogger')
+        self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
 
         logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s:%(message)s',

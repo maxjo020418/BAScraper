@@ -31,7 +31,7 @@ class PullPushAsync:
         :param log_level: sets the log level for logging (file)
         :param duplicate_action: decides what to do with duplicate entries (usually caused by deletion)
 
-        ### some extra explanations here:
+        ### some extra explanations:
 
         for `pace_mode`, HARD and SOFT means it'll shoot requests until reaching that limit and
         sleep until the pool is filled back up (controlled by REFILL_SECOND)
@@ -66,27 +66,30 @@ class PullPushAsync:
              "['keep_newest', 'keep_oldest', 'remove', 'keep_original', 'keep_removed']")
         self.duplicate_action = duplicate_action
 
-        # TODO: fix logger(log_stream works) not properly working in async
-
         # logger stuffs
         log_levels = ['NOTSET', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
         assert log_stream_level in log_levels and log_level in log_levels, \
             '`log_level` should be a string representation of logging level such as `INFO`'
 
-        self.logger = logging.getLogger('BALogger')
-        self.logger.setLevel(log_level)
-        logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s:%(message)s',
-                            filename=os.path.join(self.cwd, 'scrape_log.log'),
+        self.logger = logging.getLogger(__name__)
+        logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s: %(message)s',
+                            filename=os.path.join(self.cwd, 'request_log.log'),
                             filemode='w',
-                            level=logging.DEBUG)
+                            level=log_level)
+
+        # log stream stuffs for terminal
         # Add a new handler only if no handlers are present
+        # prevents multiple instances from forming when PullPushAsync instance is made more than once
         if not self.logger.handlers:
             # create console logging handler and set level
             ch = logging.StreamHandler()
             ch.setLevel(log_stream_level)
             ch.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
             self.logger.addHandler(ch)
-        self.logger.propagate = False  # Prevent logging from propagating to the root logger
+
+        # Prevent logging from propagating to the root logger
+        # uncomment below to prevent logging stuff from the subprocesses (async functions)
+        # self.logger.propagate = False
 
         # start timer for API pool refill
         self.last_refilled = time.time()
@@ -152,7 +155,6 @@ class PullPushAsync:
 
         else:
             results = preprocess_json(self, [res for task in tasks for res in task.result()])
-            print(len(results))
             return results
 
         finally:
