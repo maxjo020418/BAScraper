@@ -165,7 +165,7 @@ async def make_request(service: Union["PullPushAsync", ], mode: str, **params) -
                     retries = 0
                     return result
 
-        except (aiohttp.ClientTimeout, aiohttp.ClientConnectionError) as err:
+        except (aiohttp.ClientConnectorError, aiohttp.ClientConnectionError) as err:
             retries += 1
             service.logger.warning(
                 f"{coro_name} | {err}\nRetrying... Attempt {retries}/{service.max_retries}")

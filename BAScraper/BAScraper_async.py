@@ -1,3 +1,4 @@
+import asyncio
 import os
 import logging
 
@@ -142,15 +143,13 @@ class PullPushAsync:
                                                 name=f'coro-{seg_num}'))
                     seg_num += 1
 
-        # TODO: have to handle errors as ExceptionGroup here. not regular ones
+        except* (asyncio.exceptions.CancelledError, asyncio.CancelledError) as err:
+            print(f'Task has been cancelled! : {err.exceptions}')
 
-        except asyncio.CancelledError as err:
-            print(f'asyncio.CancelledError: {err}')
+        except* (KeyboardInterrupt, SystemExit) as err:
+            print(f'terminated by user or system! : {err.exceptions}')
 
-        except (KeyboardInterrupt, SystemExit) as err:
-            print('terminated by user or system.')
-
-        except Exception as err:
+        except* Exception as err:
             raise err
 
         else:
