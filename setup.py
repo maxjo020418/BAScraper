@@ -15,7 +15,6 @@ LONG_DESCRIPTION = '''currently it can:
 check the [documentation on the github](https://github.com/maxjo020418/BAScraper) for detailed info
 '''
 
-# Setting up
 setup(
     name="BAScraper",
     version=VERSION,
@@ -25,15 +24,17 @@ setup(
     long_description_content_type="text/markdown",
     long_description=LONG_DESCRIPTION,
     packages=find_packages(),
-    install_requires=['requests'],
-
-    keywords=['reddit scraper', 'reddit', 'scraper', 'pullpush', 'wrapper'],
+    install_requires=['aiohttp'],
+    extras_require={
+        'multithreading_requests':  ['requests']
+    },
+    keywords=['reddit', 'scraper', 'PullPush', 'wrapper'],
     classifiers=[
         "Development Status :: 2 - Pre-Alpha",
-        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.10cl",
         "License :: OSI Approved :: MIT License",
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.11",
     project_urls={
       'Github': 'https://github.com/maxjo020418/BAScraper'
     }

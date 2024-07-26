@@ -1,8 +1,20 @@
-import asyncio
 import os
 import logging
+import datetime
+from tempfile import TemporaryDirectory
 
 from BAScraper.utils import *
+
+
+# TODO: for docs =>
+#  1. recommend to make multiple kinds of requests under the same PullPushAsync class.
+#  (needs to share some values like timeout stuffs)
+#  also need to mention that restarting the script would reset the used up pool values,
+#  so users need to keep that in mind
+#  2. At any moment an empty result is returned, the coro will stop making requests.
+#  This is an unintended behavior(in the while loop) and might cause problems if filters are used
+#  since it might return empty results in certain segments and would end the search early.
+#  need to work/workaround on a fix regarding that.
 
 
 class PullPushAsync:
@@ -12,7 +24,7 @@ class PullPushAsync:
                  max_retries: int = 5,
                  timeout: float = 10,
                  pace_mode: str = 'auto-hard',
-                 cwd=os.getcwd(),
+                 workdir=os.getcwd(),
                  save_dir=os.getcwd(),
                  task_num=3,
                  log_stream_level: str = 'INFO',
@@ -25,7 +37,7 @@ class PullPushAsync:
         :param max_retries: maximum retry times before failing
         :param timeout: time until it's considered as timout err
         :param pace_mode: methods of pacing to mitigate the ratelimit(pool), auto-hard by default
-        :param cwd: path where this will store all the stuffs needed, defaults to cwd
+        :param workdir: path where this will store stuffs needed, defaults to `workdir`
         :param save_dir: directory to save the results
         :param task_num: number of async tasks to be made per-segment
         :param log_stream_level: sets the log level for logs streamed on the terminal
@@ -43,7 +55,7 @@ class PullPushAsync:
         for removed, it'll just exclude it from the results. (remove altogether)
         """
 
-        # declaring service type, for all pre-configured variables and params
+        # declaring service type, for all pre-configured variables, params and stuffs
         self.SERVICE = Params.PullPush
 
         assert pace_mode in ['auto-soft', 'auto-hard', 'manual']
@@ -58,7 +70,7 @@ class PullPushAsync:
         self.backoff_sec = backoff_sec
         self.max_retries = max_retries
         self.timeout = timeout
-        self.cwd = cwd
+        self.workdir = workdir
         self.save_dir = save_dir
         self.task_num = task_num
 
@@ -74,7 +86,7 @@ class PullPushAsync:
 
         self.logger = logging.getLogger(__name__)
         logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s: %(message)s',
-                            filename=os.path.join(self.cwd, 'request_log.log'),
+                            filename=os.path.join(self.workdir, 'request_log.log'),
                             filemode='w',
                             level=log_level)
 
@@ -85,7 +97,7 @@ class PullPushAsync:
             # create console logging handler and set level
             ch = logging.StreamHandler()
             ch.setLevel(log_stream_level)
-            ch.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
+            ch.setFormatter(logging.Formatter('%(asctime)s: %(levelname)s - %(message)s'))
             self.logger.addHandler(ch)
 
         # Prevent logging from propagating to the root logger
@@ -95,11 +107,13 @@ class PullPushAsync:
         # start timer for API pool refill
         self.last_refilled = time.time()
 
-    async def get_submissions(self, **params) -> Union[None, dict]:
-        """
-        :param params:
+        # temp dir for storing received results
+        self.temp_dir: Union[TemporaryDirectory, None] = None
 
-        will save the results on disk, in the specified dir(`save_dir`).
+    async def get_submissions(self, file_name=None, **params) -> Union[None, dict]:
+        """
+        :param file_name: file name to use for the saves json result. If `None`, doesn't sava the file.
+        :param params:
 
         if `after` and `before` both exists, it'll get all the stuff in-between
         if only `after` exists, it'll get the `after` ~> current-time
@@ -114,7 +128,8 @@ class PullPushAsync:
             assert params['after'] < int(time.time()), '`after` needs to be smaller than current time'
             params['before'] = int(time.time())
             self.logger.info(f'only `after` was detected for time parameters, '
-                             f'making requests until current time starting from {params['after']}')
+                             f'making requests until current time starting from '
+                             f'{datetime.fromtimestamp(params['after'])}')
         elif 'after' not in params and 'before' in params:
             self.task_num = 1
             self.logger.info('only `before` was detected for time parameters, making single request')
@@ -124,42 +139,57 @@ class PullPushAsync:
             self.logger.info('no time parameter was detected, making single request')
             single_request = True
 
-        if single_request:
-            self.logger.debug('Running request in single-coro-mode')
-            result = await make_request(self, 'submissions', **params)
-            # TODO: make and put save-to-disk function here
-            return preprocess_json(self, result)
-
-        # segment time is from oldest -> newest
-        segment_ranges = split_range(params['after'], params['before'], self.task_num)
-
+        # temp dir for storing received results
+        self.temp_dir = TemporaryDirectory(prefix='BAScraper-temp_', dir=self.workdir, delete=False)
+        self.logger.debug(f'Temp directory created: {self.temp_dir.name}')
+        exception_occurred = False
         try:
-            async with asyncio.TaskGroup() as tg:
-                tasks = list()
-                seg_num = 1
-                for segment in segment_ranges:
-                    params['after'], params['before'] = segment
-                    tasks.append(tg.create_task(make_request_loop(self, 'submissions', **params),
-                                                name=f'coro-{seg_num}'))
-                    seg_num += 1
+            if single_request:
+                self.logger.debug('Running request in single-coro-mode')
+                result = await make_request(self, 'submissions', **params)
+                result = preprocess_json(self, result)
+            else:  # regular ranged request
+                # segment time is from oldest -> newest
+                segment_ranges = split_range(params['after'], params['before'], self.task_num)
+                async with asyncio.TaskGroup() as tg:
+                    tasks = list()
+                    seg_num = 1
+                    for segment in segment_ranges:
+                        params['after'], params['before'] = segment
+                        tasks.append(tg.create_task(make_request_loop(self, 'submissions', **params),
+                                                    name=f'coro-{seg_num}'))
+                        seg_num += 1
+                result = preprocess_json(self, [res for task in tasks for res in task.result()])
 
         except* (asyncio.exceptions.CancelledError, asyncio.CancelledError) as err:
-            print(f'Task has been cancelled! : {err.exceptions}')
+            self.logger.error(f'Task has been cancelled! : {err.exceptions}')
+            exception_occurred = True
 
         except* (KeyboardInterrupt, SystemExit) as err:
-            print(f'terminated by user or system! : {err.exceptions}')
+            self.logger.error(f'terminated by user or system! : {err.exceptions}')
+            exception_occurred = True
 
         except* Exception as err:
             raise err
 
         else:
-            results = preprocess_json(self, [res for task in tasks for res in task.result()])
-            return results
+            if file_name:
+                self.logger.info('saving result...')
+                with open(os.path.join(self.save_dir, file_name + '.json'), 'w+') as f:
+                    json.dump(result, f, indent=4)
+
+            return result
 
         finally:
-            pass
-            # TODO: make and put save-to-disk function here
-            # since there may have been exceptions, try to safely save
+            # TODO: some more robust file saving - check is file exist, file extensions... etc
+            if exception_occurred:
+                self.logger.warning('Some errors occurred while fetching, '
+                                    f'preserving temp_dir as {self.temp_dir.name}')
+                # might add some extra actions here
+                return  # don't close/cleanup the `self.temp_dir`
+            else:
+                self.temp_dir.cleanup()
 
     async def get_comments(self, **params) -> Union[None, dict]:
+        # TODO: add comment fetching
         pass

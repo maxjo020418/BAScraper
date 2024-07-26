@@ -1,3 +1,5 @@
+from datetime import datetime, date
+import os.path
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Union, List
 from time import perf_counter
@@ -9,7 +11,7 @@ import re
 
 import BAScraper.BAScraper
 
-if TYPE_CHECKING:  # prevent circular imports
+if TYPE_CHECKING:  # prevent circular imports due to the `typing` module
     from BAScraper.BAScraper_async import PullPushAsync
 
 
@@ -156,19 +158,28 @@ async def make_request(service: Union["PullPushAsync", ], mode: str, **params) -
                     if response.ok:
                         service.logger.info(
                             f"{coro_name} | pool: {service.pool_amount} | len: {len(result)} | time: {round(toc - tic, 2)}")
-                    else:  # in case it doesn't raise an exception but still has errors
+                        await _request_sleep(service)
+                        return result
+                    else:
+                        # in case it doesn't raise an exception but still has errors, (cloudflare errors)
+                        # usually caught by the try/except
                         response_text = await response.text()
                         service.logger.error(f"{coro_name} | {response.status}"
                                              f"\n{response_text}\n")
+                        retries += 1
+                        await _request_sleep(service, service.backoff_sec * retries)  # backoff
+                        continue
 
-                    await _request_sleep(service)
-                    retries = 0
-                    return result
+        except asyncio.TimeoutError as err:
+            retries += 1
+            service.logger.warning(
+                f"{coro_name} | TimeoutError: Retrying... Attempt {retries}/{service.max_retries}")
+            await _request_sleep(service, service.backoff_sec * retries)  # backoff
 
         except (aiohttp.ClientConnectorError, aiohttp.ClientConnectionError) as err:
             retries += 1
             service.logger.warning(
-                f"{coro_name} | {err}\nRetrying... Attempt {retries}/{service.max_retries}")
+                f"{coro_name} | ClientConnectionError: Retrying... Attempt {retries}/{service.max_retries}")
             await _request_sleep(service, service.backoff_sec * retries)  # backoff
 
         except json.decoder.JSONDecodeError:
@@ -187,6 +198,16 @@ async def make_request(service: Union["PullPushAsync", ], mode: str, **params) -
 
 async def make_request_loop(service: Union["PullPushAsync", ], mode: str, **params) -> List[Union[dict, None]]:
     coro_name = asyncio.current_task().get_name()
+
+    def temp_save(data):
+        # saving individual returned results
+        temp_fp = os.path.join(service.temp_dir.name,
+                               f'{datetime.fromtimestamp(params['after']).strftime("%Y-%m-%d_%H-%M-%S")}__'
+                               f'{datetime.fromtimestamp(params['before']).strftime("%Y-%m-%d_%H-%M-%S")}.json')
+        with open(temp_fp, 'w+', encoding='utf-8') as f:
+            json.dump(data, f, indent=4)
+            service.logger.debug(f'Saved temp file at {temp_fp}')
+
     match service:
         case _ if isinstance(service, BAScraper.BAScraper_async.PullPushAsync):
             svc_type = Params.PullPush()
@@ -197,6 +218,7 @@ async def make_request_loop(service: Union["PullPushAsync", ], mode: str, **para
         'for `make_request_loop` to work, it needs to have both `after` and `before` in the params'
 
     res = await make_request(service, mode, **params)
+    temp_save(res)
     final_res = list() + res
 
     # at least for PullPush the newest result is returned first
@@ -206,6 +228,7 @@ async def make_request_loop(service: Union["PullPushAsync", ], mode: str, **para
         params['before'] = int(res[-1]['created_utc']) - 1
         service.logger.debug(f'{coro_name} | param info: {params['after']} -> {params['before']}')
         res = await make_request(service, mode, **params)
+        temp_save(res)
         final_res += res
 
     service.logger.debug(f'{coro_name} | finished!')
@@ -226,7 +249,7 @@ async def _request_sleep(service: Union["PullPushAsync", ], sleep_sec: float = N
         service.logger.info(f'pool refilled!')
 
     match service.pace_mode:
-        case 'auto-hard' | 'auto-soft':
+        case 'auto-hard' | 'auto-soft':  # no difference in throttling for now
             if time.time() - service.last_refilled > service.SERVICE.REFILL_SECOND:
 
                 match service.pace_mode:
@@ -243,10 +266,9 @@ async def _request_sleep(service: Union["PullPushAsync", ], sleep_sec: float = N
                 service.pool_amount -= 1
                 await asyncio.sleep(sleep_sec)
                 return
-            else:
+            else:  # empty pool
                 s = service.SERVICE.REFILL_SECOND - (time.time() - service.last_refilled)
-                service.logger.info(f'hard limit reached! throttling for {s}...')
-                service.logger.info(f'sleeping for {s}sec')
+                service.logger.info(f'hard limit reached! throttling for {round(s)} seconds...')
                 time.sleep(s)
                 await _request_sleep(service, sleep_sec)
 

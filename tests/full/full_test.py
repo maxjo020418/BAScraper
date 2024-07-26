@@ -4,12 +4,22 @@ import json
 import asyncio
 
 ppa = PullPushAsync(log_stream_level="DEBUG")
-result = asyncio.run(ppa.get_submissions(subreddit='bluearchive',
-                                         after=datetime.timestamp(
-                                             datetime(2024, 7, 1)),
-                                         before=datetime.timestamp(
-                                             datetime(2024, 7, 7)),
-                                         ))
 
-with open('test.json', 'w') as f:
-    json.dump(result, f, indent=4)
+print('TEST 1')
+result1 = asyncio.run(ppa.get_submissions(subreddit='bluearchive',
+                                          after=datetime.timestamp(
+                                              datetime(2024, 7, 1)),
+                                          before=datetime.timestamp(
+                                             datetime(2024, 7, 8)),
+                                          file_name='result1'
+                                          ))
+
+print('\nTEST 2')
+result2 = asyncio.run(ppa.get_submissions(subreddit='bluearchive',
+                                          after=datetime.timestamp(
+                                              datetime(2024, 7, 1)),
+                                          file_name='result2'
+                                          ))
+
+print('result1 len:', len(result1))
+print('result2 len:', len(result2))
