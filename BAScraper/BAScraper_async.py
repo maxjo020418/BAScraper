@@ -2,6 +2,7 @@ import os
 import logging
 import datetime
 from tempfile import TemporaryDirectory
+from queue import PriorityQueue
 
 from BAScraper.utils import *
 
@@ -110,6 +111,9 @@ class PullPushAsync:
         # temp dir for storing received results
         self.temp_dir: Union[TemporaryDirectory, None] = None
 
+        # priority queue for storing the returned results
+        self.priority_queue = PriorityQueue()
+
     async def get_submissions(self, file_name=None, **params) -> Union[None, dict]:
         """
         :param file_name: file name to use for the saves json result. If `None`, doesn't sava the file.
@@ -143,13 +147,25 @@ class PullPushAsync:
         self.temp_dir = TemporaryDirectory(prefix='BAScraper-temp_', dir=self.workdir, delete=False)
         self.logger.debug(f'Temp directory created: {self.temp_dir.name}')
         exception_occurred = False
+
+        ################################
+        # FIXME: fix from this point on
+        ################################
+
         try:
             if single_request:
                 self.logger.debug('Running request in single-coro-mode')
                 result = await make_request(self, 'submissions', **params)
                 result = preprocess_json(self, result)
-            else:  # regular ranged request
-                # segment time is from oldest -> newest
+            else:
+                async with asyncio.TaskGroup() as tg:
+                    for task_num in range(self.task_num):
+                        tasks = list()
+                        tasks.append(tg.create_task(make_request_loop(self, 'submissions', **params),
+                                                    name=f'coro-{task_num}'))
+
+
+
                 segment_ranges = split_range(params['after'], params['before'], self.task_num)
                 async with asyncio.TaskGroup() as tg:
                     tasks = list()
@@ -173,6 +189,7 @@ class PullPushAsync:
             raise err
 
         else:
+            # FIXME: some more robust file saving - check if file exists, file extensions... etc
             if file_name:
                 self.logger.info('saving result...')
                 with open(os.path.join(self.save_dir, file_name + '.json'), 'w+') as f:
@@ -181,7 +198,6 @@ class PullPushAsync:
             return result
 
         finally:
-            # TODO: some more robust file saving - check is file exist, file extensions... etc
             if exception_occurred:
                 self.logger.warning('Some errors occurred while fetching, '
                                     f'preserving temp_dir as {self.temp_dir.name}')
