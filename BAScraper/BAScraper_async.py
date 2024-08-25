@@ -25,7 +25,6 @@ class PullPushAsync:
                  max_retries: int = 5,
                  timeout: float = 10,
                  pace_mode: str = 'auto-hard',
-                 workdir=os.getcwd(),
                  save_dir=os.getcwd(),
                  task_num=3,
                  log_stream_level: str = 'INFO',
@@ -38,9 +37,8 @@ class PullPushAsync:
         :param max_retries: maximum retry times before failing
         :param timeout: time until it's considered as timout err
         :param pace_mode: methods of pacing to mitigate the ratelimit(pool), auto-hard by default
-        :param workdir: path where this will store stuffs needed, defaults to `workdir`
-        :param save_dir: directory to save the results
-        :param task_num: number of async tasks to be made per-segment
+        :param save_dir: directory to save the results, defaults to current directory
+        :param task_num: number of async tasks to be made
         :param log_stream_level: sets the log level for logs streamed on the terminal
         :param log_level: sets the log level for logging (file)
         :param duplicate_action: decides what to do with duplicate entries (usually caused by deletion)
@@ -71,7 +69,6 @@ class PullPushAsync:
         self.backoff_sec = backoff_sec
         self.max_retries = max_retries
         self.timeout = timeout
-        self.workdir = workdir
         self.save_dir = save_dir
         self.task_num = task_num
 
@@ -113,7 +110,7 @@ class PullPushAsync:
 
     async def get_submissions(self, file_name=None, get_comments=False, **params) -> Union[None, dict]:
         """
-        :param file_name: file name to use for the saves json result. If `None`, doesn't sava the file.
+        :param file_name: file name to use for the saves json result. If `None`, doesn't save the file.
         :param get_comments: if `True`, will also fetch comments belonging to the submission
         :param params:
 
