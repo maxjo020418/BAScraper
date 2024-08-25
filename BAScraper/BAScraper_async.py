@@ -2,6 +2,7 @@ import os
 import logging
 import datetime
 from tempfile import TemporaryDirectory
+from collections import defaultdict
 
 from BAScraper.utils import *
 
@@ -110,9 +111,10 @@ class PullPushAsync:
         # temp dir for storing received results
         self.temp_dir: Union[TemporaryDirectory, None] = None
 
-    async def get_submissions(self, file_name=None, **params) -> Union[None, dict]:
+    async def get_submissions(self, file_name=None, get_comments=False, **params) -> Union[None, dict]:
         """
         :param file_name: file name to use for the saves json result. If `None`, doesn't sava the file.
+        :param get_comments: if `True`, will also fetch comments belonging to the submission
         :param params:
 
         if `after` and `before` both exists, it'll get all the stuff in-between
@@ -122,6 +124,7 @@ class PullPushAsync:
         """
         single_request = False
 
+        # basic parameter check
         if 'after' in params and 'before' in params:
             assert params['after'] < params['before'], '`before` needs to be bigger than `after`'
         elif 'after' in params and 'before' not in params:
@@ -140,7 +143,7 @@ class PullPushAsync:
             single_request = True
 
         # temp dir for storing received results
-        self.temp_dir = TemporaryDirectory(prefix='BAScraper-temp_', dir=self.workdir, delete=False)
+        self.temp_dir = TemporaryDirectory(prefix='BAScraper-submission-temp_', dir=self.workdir, delete=False)
         self.logger.debug(f'Temp directory created: {self.temp_dir.name}')
         exception_occurred = False
         try:
@@ -157,6 +160,101 @@ class PullPushAsync:
                     for segment in segment_ranges:
                         params['after'], params['before'] = segment
                         tasks.append(tg.create_task(make_request_loop(self, 'submissions', **params),
+                                                    name=f'coro-{seg_num}'))
+                        seg_num += 1
+                result = preprocess_json(self, [res for task in tasks for res in task.result()])
+
+        except* (asyncio.exceptions.CancelledError, asyncio.CancelledError) as err:
+            self.logger.error(f'Task has been cancelled! : {err.exceptions}')
+            exception_occurred = True
+
+        except* (KeyboardInterrupt, SystemExit) as err:
+            self.logger.error(f'terminated by user or system! : {err.exceptions}')
+            exception_occurred = True
+
+        except* Exception as err:
+            raise err
+
+        else:
+            if get_comments:
+                self.logger.info('Starting comment fetching...')
+                submission_ids = asyncio.Queue()
+                for submission_id in result.keys():
+                    await submission_ids.put(submission_id)
+                comments = await self._get_link_ids_comments(submission_ids)
+
+                # TODO: I should add the field while creating the dict rather than looping through it later.
+                # too lazy to implement it now though
+                for submission in result.values():
+                    submission.update({'comments': list()})
+
+                for comment in comments.values():
+                    result[comment['link_id'][3:]]['comments'].append(comment)  # needs comment['link_id'][3:] due to 't3_' prefix for the ID
+
+            if file_name:
+                self.logger.info('saving result...')
+                with open(os.path.join(self.save_dir, file_name + '.json'), 'w+') as f:
+                    json.dump(result, f, indent=4)
+
+            return result
+
+        finally:
+            # TODO: some more robust file saving - check is file exist, file extensions... etc
+            if exception_occurred:
+                self.logger.warning('Some errors occurred while fetching, '
+                                    f'preserving temp_dir as {self.temp_dir.name}')
+                # might add some extra actions here
+                return  # don't close/cleanup the `self.temp_dir`
+            else:
+                self.temp_dir.cleanup()
+
+    async def get_comments(self, file_name=None, **params) -> Union[None, dict]:
+        """
+        :param file_name: file name to use for the saves json result. If `None`, doesn't sava the file.
+        :param params:
+        :return:
+        """
+        single_request = False
+
+        # basic parameter check
+        if 'after' in params and 'before' in params:
+            assert params['after'] < params['before'], '`before` needs to be bigger than `after`'
+        elif 'after' in params and 'before' not in params:
+            assert params['after'] < int(time.time()), '`after` needs to be smaller than current time'
+            params['before'] = int(time.time())
+            self.logger.info(f'only `after` was detected for time parameters, '
+                             f'making requests until current time starting from '
+                             f'{datetime.fromtimestamp(params['after'])}')
+        elif 'after' not in params and 'before' in params:
+            self.task_num = 1
+            self.logger.info('only `before` was detected for time parameters, making single request')
+            single_request = True
+        elif 'link_id' in params:  # comment group fetch from submission (done in single request)
+            self.logger.debug('making `link_id` single request')
+            single_request = True
+        else:  # both not in params
+            self.task_num = 1
+            self.logger.info('no time parameter was detected, making single request')
+            single_request = True
+
+        # temp dir for storing received results
+        self.temp_dir = TemporaryDirectory(prefix='BAScraper-comment-temp_', dir=self.workdir, delete=False)
+        self.logger.debug(f'Temp directory created: {self.temp_dir.name}')
+        exception_occurred = False
+        try:
+            if single_request:
+                self.logger.debug('Running request in single-coro-mode')
+                result = await make_request(self, 'comments', **params)
+                result = preprocess_json(self, result)
+            else:  # regular ranged request
+                # segment time is from oldest -> newest
+                segment_ranges = split_range(params['after'], params['before'], self.task_num)
+                async with asyncio.TaskGroup() as tg:
+                    tasks = list()
+                    seg_num = 1
+                    for segment in segment_ranges:
+                        params['after'], params['before'] = segment
+                        tasks.append(tg.create_task(make_request_loop(self, 'comments', **params),
                                                     name=f'coro-{seg_num}'))
                         seg_num += 1
                 result = preprocess_json(self, [res for task in tasks for res in task.result()])
@@ -190,6 +288,56 @@ class PullPushAsync:
             else:
                 self.temp_dir.cleanup()
 
-    async def get_comments(self, **params) -> Union[None, dict]:
-        # TODO: add comment fetching
-        pass
+    async def _get_link_ids_comments(self, link_ids: asyncio.Queue) -> Union[dict, None]:
+        """
+        :param link_ids: `Queue` containing `link_id`. Needs to be an `asyncio.Queue`
+        :return: dict of comments, indexed based on `link_id`
+
+        stripped down version of `get_comments` used for `get_submissions`'s `link_id` fetch functionality
+        """
+
+        # temp dir for storing received results
+        self.temp_dir = TemporaryDirectory(prefix='BAScraper-link-id-comment-temp_', dir=self.workdir, delete=False)
+        self.logger.debug(f'Temp directory created: {self.temp_dir.name}')
+        exception_occurred = False
+
+        # temp function for custom request loop
+        async def link_id_worker(queue: asyncio.Queue) -> List[dict]:
+            res = list()
+            while not queue.empty():
+                link_id = await queue.get()
+                queue.task_done()  # Mark the task as done (needed for asyncio.Queue consumers)
+                res.append(await make_request(self, 'comments', link_id=link_id))
+                self.logger.info(f'{queue.qsize()} items left')
+            return [comment for comments in res for comment in comments]
+
+        try:
+            async with asyncio.TaskGroup() as tg:
+                tasks = list()
+                for task_no in range(self.task_num):
+                    tasks.append(tg.create_task(link_id_worker(link_ids), name=f'coro-{task_no}'))
+            result = preprocess_json(self, [res for task in tasks for res in task.result()])
+
+        except* (asyncio.exceptions.CancelledError, asyncio.CancelledError) as err:
+            self.logger.error(f'Task has been cancelled! : {err.exceptions}')
+            exception_occurred = True
+
+        except* (KeyboardInterrupt, SystemExit) as err:
+            self.logger.error(f'terminated by user or system! : {err.exceptions}')
+            exception_occurred = True
+
+        except* Exception as err:
+            raise err
+
+        else:
+            return result
+
+        finally:
+            # TODO: some more robust file saving - check is file exist, file extensions... etc
+            if exception_occurred:
+                self.logger.warning('Some errors occurred while fetching, '
+                                    f'preserving temp_dir as {self.temp_dir.name}')
+                # might add some extra actions here
+                return  # don't close/cleanup the `self.temp_dir`
+            else:
+                self.temp_dir.cleanup()

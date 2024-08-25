@@ -100,16 +100,16 @@ def _process_params(service: Union["Params.PullPush", "Params.Arctic"],
         scheme = service.submission_params
         uri_string = service.SUBMISSION_URI
     else:
-        raise Exception('wrong `mode` param for `process_params`')
+        raise Exception('wrong `mode` param for `_process_params`')
 
     # assertion stuffs using the `submission_params` and `comment_params`
     for k, v in params.items():
         if (dat := scheme.get(k)) is not None:
-            assert isinstance(v, dat[0]), f'Param "{v}" should be {dat[0]}'
+            assert isinstance(v, dat[0]), f'{k} Param "{v}" should be {dat[0]}'
             if dat[1] is not None:
-                assert dat[1](v), f"Param \"{v}\" doesn't meet or satisfy the requirements"
+                assert dat[1](v), f"Param \"{k}: {v}\" doesn't meet or satisfy the requirements"
         else:
-            raise Exception(f'{v} is not accepted as a parameter')
+            raise Exception(f'\"{k}: {v}\" is not accepted as a parameter')
 
     # empty `params` don't need the URI parts after, so just return
     if len(params) <= 0:
@@ -140,7 +140,7 @@ async def make_request(service: Union["PullPushAsync", ], mode: str, **params) -
         case _ if isinstance(service, BAScraper.BAScraper_async.PullPushAsync):
             svc_type = Params.PullPush()
         case _:
-            raise Exception(f'{type(service)} no such service is supported')
+            raise Exception(f'{service} -> No such service is supported')
 
     uri = _process_params(svc_type, mode, **params)
 
@@ -280,16 +280,17 @@ async def _request_sleep(service: Union["PullPushAsync", ], sleep_sec: float = N
             raise Exception(f'Wrong variable for `mode`!')
 
 
-def preprocess_json(service: Union["PullPushAsync", ], obj: List[dict]) -> dict:
+def preprocess_json(service: Union["PullPushAsync", ], obj: List[dict], index: str = 'id') -> dict:
     """
     :param service:
     :param obj:
+    :param index: what parameter should the indexing be based on
     :return: JSON(dict) indexed by the submission/comment ID
     """
 
     indexed = dict()
     for elem in obj:
-        elem_id = elem['id']
+        elem_id = elem[index]
         if elem_id not in indexed:  # new entry
             indexed[elem_id] = elem
         else:  # possible duplicate
