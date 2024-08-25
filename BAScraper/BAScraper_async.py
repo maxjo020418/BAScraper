@@ -184,22 +184,19 @@ class PullPushAsync:
                 comments = await self._get_link_ids_comments(submission_ids)
 
                 # TODO: I should add the field while creating the dict rather than looping through it later.
-                # too lazy to implement it now though
+                #  too lazy to implement it now though
                 for submission in result.values():
                     submission.update({'comments': list()})
 
                 for comment in comments.values():
-                    result[comment['link_id'][3:]]['comments'].append(comment)  # needs comment['link_id'][3:] due to 't3_' prefix for the ID
+                    # needs comment['link_id'][3:] due to 't3_' prefix for the ID
+                    result[comment['link_id'][3:]]['comments'].append(comment)
 
             if file_name:
-                self.logger.info('saving result...')
-                with open(os.path.join(self.save_dir, file_name + '.json'), 'w+') as f:
-                    json.dump(result, f, indent=4)
-
+                save_json(self, file_name, result)
             return result
 
         finally:
-            # TODO: some more robust file saving - check is file exist, file extensions... etc
             if exception_occurred:
                 self.logger.warning('Some errors occurred while fetching, '
                                     f'preserving temp_dir as {self.temp_dir.name}')
@@ -272,14 +269,10 @@ class PullPushAsync:
 
         else:
             if file_name:
-                self.logger.info('saving result...')
-                with open(os.path.join(self.save_dir, file_name + '.json'), 'w+') as f:
-                    json.dump(result, f, indent=4)
-
+                save_json(self, file_name, result)
             return result
 
         finally:
-            # TODO: some more robust file saving - check is file exist, file extensions... etc
             if exception_occurred:
                 self.logger.warning('Some errors occurred while fetching, '
                                     f'preserving temp_dir as {self.temp_dir.name}')
@@ -294,11 +287,16 @@ class PullPushAsync:
         :return: dict of comments, indexed based on `link_id`
 
         stripped down version of `get_comments` used for `get_submissions`'s `link_id` fetch functionality
+
+        TODO: make it more seamlessly integrated. also, the `self.temp_dir` should be re-worked to incorporate
+         temp saving of the `_get_link_ids_comments` results. when this function uses the `self.temp_dir` to handle
+         temp directories, it overwrites the existing `self.temp_dir` used previously in `get_submissions`,
+         causing problems (not cleaning up the temp_dir)
         """
 
         # temp dir for storing received results
-        self.temp_dir = TemporaryDirectory(prefix='BAScraper-link-id-comment-temp_', dir=self.workdir, delete=False)
-        self.logger.debug(f'Temp directory created: {self.temp_dir.name}')
+        # self.temp_dir = TemporaryDirectory(prefix='BAScraper-link-id-comment-temp_', dir=self.workdir, delete=False)
+        # self.logger.debug(f'Temp directory created: {self.temp_dir.name}')
         exception_occurred = False
 
         # temp function for custom request loop
@@ -333,11 +331,11 @@ class PullPushAsync:
             return result
 
         finally:
-            # TODO: some more robust file saving - check is file exist, file extensions... etc
             if exception_occurred:
                 self.logger.warning('Some errors occurred while fetching, '
                                     f'preserving temp_dir as {self.temp_dir.name}')
                 # might add some extra actions here
                 return  # don't close/cleanup the `self.temp_dir`
             else:
-                self.temp_dir.cleanup()
+                pass
+                # self.temp_dir.cleanup()

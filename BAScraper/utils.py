@@ -1,7 +1,7 @@
 from datetime import datetime, date
 import os.path
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Union, List
+from typing import TYPE_CHECKING, Union, List, AnyStr
 from time import perf_counter
 import asyncio
 import aiohttp
@@ -88,8 +88,6 @@ def _process_params(service: Union["Params.PullPush", "Params.Arctic"],
     :return: string that contains the structured URI
 
     check `URI_params.md` for accepted parameters and more details
-
-    TODO: I forgot what the endpoint did when it had no params...
     """
 
     # setting up the mode (whether it's for comments or submissions)
@@ -157,7 +155,7 @@ async def make_request(service: Union["PullPushAsync", ], mode: str, **params) -
 
                     if response.ok:
                         service.logger.info(
-                            f"{coro_name} | pool: {service.pool_amount} | len: {len(result)} | time: {round(toc - tic, 2)}")
+                            f"{coro_name} | pool: {service.pool_amount} | len: {len(result)} | time: {toc - tic:.2f}")
                         await _request_sleep(service)
                         return result
                     else:
@@ -413,3 +411,28 @@ def split_range(epoch_low: int, epoch_high: int, n: int) -> List[list]:
         current_low = current_high + 1
 
     return ranges
+
+def save_json(service: Union["PullPushAsync", ], file_name: str, data: dict):
+    service.logger.info('Saving result...')
+
+    # Ensure the file has the correct extension
+    if not file_name.endswith('.json'):
+        file_name += '.json'
+
+    # Construct full path for the file
+    file_path = os.path.join(service.save_dir, file_name)
+
+    # Check if the file already exists
+    if os.path.exists(file_path):
+        service.logger.warning(f"File {file_path} already exists. Saving with a unique name.")
+        base_name, ext = os.path.splitext(file_name)
+        counter = 1
+        while os.path.exists(file_path):
+            new_file_name = f"{base_name}_{counter}{ext}"
+            file_path = os.path.join(service.save_dir, new_file_name)
+            counter += 1
+
+    # Save the result to the file
+    with open(file_path, 'w+') as f:
+        json.dump(data, f, indent=4)
+    service.logger.info(f"Result saved successfully as {file_path}")
