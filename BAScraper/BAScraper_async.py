@@ -84,7 +84,7 @@ class PullPushAsync:
 
         self.logger = logging.getLogger(__name__)
         logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s: %(message)s',
-                            filename=os.path.join(self.workdir, 'request_log.log'),
+                            filename=os.path.join(self.save_dir, 'request_log.log'),
                             filemode='w',
                             level=log_level)
 
@@ -140,7 +140,7 @@ class PullPushAsync:
             single_request = True
 
         # temp dir for storing received results
-        self.temp_dir = TemporaryDirectory(prefix='BAScraper-submission-temp_', dir=self.workdir, delete=False)
+        self.temp_dir = TemporaryDirectory(prefix='BAScraper-submission-temp_', dir=self.save_dir, delete=False)
         self.logger.debug(f'Temp directory created: {self.temp_dir.name}')
         exception_occurred = False
         try:
@@ -232,7 +232,7 @@ class PullPushAsync:
             single_request = True
 
         # temp dir for storing received results
-        self.temp_dir = TemporaryDirectory(prefix='BAScraper-comment-temp_', dir=self.workdir, delete=False)
+        self.temp_dir = TemporaryDirectory(prefix='BAScraper-comment-temp_', dir=self.save_dir, delete=False)
         self.logger.debug(f'Temp directory created: {self.temp_dir.name}')
         exception_occurred = False
         try:
