@@ -20,7 +20,8 @@ It uses multithreading to make requests to the PullPush.io endpoint and returns 
 Also, please ask the PullPush.io owner before making large amounts or request and also respect cool-down times. 
 It stresses the server and can cause inconvenience for everyone.
 
-> [!WARNING] As of Feb. 2024, PullPush API implemented ratelimiting!
+> **⚠️ As of Feb. 2024, PullPush API implemented ratelimiting!**
+> 
 > soft limit will occur after 15 req/min and hard limit after 30 req/min. There's also a long-term (hard) limit of 1000 req/hr.<br><br>
 > **Recommended request pacing:**
 > - to prevent soft-limit: 4 sec sleep per request
