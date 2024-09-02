@@ -151,7 +151,14 @@ async def make_request(service: Union["PullPushAsync", ], mode: str, **params) -
                 async with session.get(uri, timeout=service.timeout) as response:
                     toc = perf_counter()
                     result = await response.json()
-                    result = result['data']
+
+                    try:
+                        # sometimes the server experiences internal error,
+                        # response itself is ok but contains no data.
+                        result = result['data']
+                    except KeyError:
+                        service.logger.error(f"received wrong response! (missing 'data' field) -> {response}")
+                        quit()
 
                     if response.ok:
                         service.logger.info(
