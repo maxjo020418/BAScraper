@@ -28,7 +28,7 @@ It stresses the server and can cause inconvenience for everyone.
 > - to prevent hard-limit: 2 sec sleep per request
 > - for 1000+ requests: 3.6 ~ 4 sec sleep per request
 > 
-> rate limiting will automatically pace your reqeust's response time to meet the following hard limits. Hence making the `pace_mode` parameter kinda useless (it was made before proper API sice pacing was made). Following the pacing time above is recommended.
+> rate limiting will automatically pace your request's response time to meet the following hard limits. Hence, making the `pace_mode` parameter kinda useless (it was made before proper API sice pacing was made). Following the pacing time above is recommended.
 
 ## basic usage & requirements
 you can install the package via pip
@@ -43,7 +43,7 @@ from datetime import datetime, timedelta
 from BAScraper.BAScraper_async import PullPushAsync
 import asyncio
 
-# `log_stream_level` can be one of DEBUG, INFO, WARNING, ERROR, CRITICAL
+# `log_stream_level` can be one of DEBUG, INFO, WARNING, ERROR
 ppa = PullPushAsync(log_stream_level="INFO")
 
 # basic fetching
@@ -69,8 +69,8 @@ result3 = asyncio.run(ppa.get_comments(subreddit='bluearchive',
                                        file_name='result3'
                                        ))
 
-# all files are auto-saved since the `file_name` field was specified. 
-# it'll save all the results in the current directory
+# all results are saved to 'resultX.json' since the `file_name` field was specified. 
+# it'll save all the results in the current directory since `save_dir` wasn't specified
 ```
 
 <details>
@@ -114,13 +114,11 @@ all parameters are optional
 | duplicate_action | `str` | one of 'keep_newest', 'keep_oldest', 'remove', 'keep_original', 'keep_removed'. decides what to do with duplicate entries (usually caused by deletion) | 'keep_newest'                     |
 
 ## `PullPushAsync.get_submissions` & `PullPushAsync.get_comments`
-all parameters are optional
+All parameters are optional, please write all parameters as keyword-arguments(kwargs) as there are no set order for the parameters.
 
-except for `file_name` and `get_comments` all other parameters are keyword-arguments(kwargs)
+These functions will return a `dict` object
 
-returns a `dict` object
-
-| parameter    | type                | description                                                                                                                              | deafult value | get_submissions | get_comments |
+| parameter    | type                | description                                                                                                                              | default value | get_submissions | get_comments |
 |--------------|---------------------|------------------------------------------------------------------------------------------------------------------------------------------|---------------|-----------------|--------------|
 | file_name    | `str`               | file name to use for the saves json result. If `None`, doesn't save the file.                                                            | `None`        | ✅               | ✅            |
 | get_comments | `bool`              | If true, the result will contain the `comments` field  where all the comments for that post will be contained(`List[dict]`)              | `False`       | ✅               |              |
@@ -147,7 +145,7 @@ returns a `dict` object
 | contest_mode | `bool`              | Exclude or include content mode submissions                                                                                              |               | ✅               |              |
 
 ## structure of the returned object
-the `PullPushAsync.get_submissions` & `PullPushAsync.get_comments` each returns a `dict` object that is indexed based on its unique ID.
+the `PullPushAsync.get_submissions` & `PullPushAsync.get_comments` each returns a `dict` object that is indexed based on its unique reddit submission/comment ID.
 It is sorted in the order you specified when scraping
 (the `sort` parameter).
 So the general structure looks like this (regardless of it being a submission or a comment):
