@@ -20,7 +20,8 @@ It uses multithreading to make requests to the PullPush.io endpoint and returns 
 Also, please ask the PullPush.io owner before making large amounts or request and also respect cool-down times. 
 It stresses the server and can cause inconvenience for everyone.
 
-> **⚠️ As of Feb. 2024, PullPush API implemented ratelimiting!**
+> [!NOTE]
+> **As of Feb. 2024, PullPush API implemented ratelimiting!**
 > 
 > soft limit will occur after 15 req/min and hard limit after 30 req/min. There's also a long-term (hard) limit of 1000 req/hr.<br><br>
 > **Recommended request pacing:**
@@ -28,14 +29,20 @@ It stresses the server and can cause inconvenience for everyone.
 > - to prevent hard-limit: 2 sec sleep per request
 > - for 1000+ requests: 3.6 ~ 4 sec sleep per request
 > 
-> rate limiting will automatically pace your request's response time to meet the following hard limits. Hence, making the `pace_mode` parameter kinda useless (it was made before proper API sice pacing was made). Following the pacing time above is recommended.
+> rate limiting will automatically pace your request's response time to meet the following hard limits. 
+> But `pace_mode` would still do cool downs just in case. Following the pacing time above is recommended.
+
+> [!WARNING]
+> The long-term hard ratelimit of 1000 req/hr is not implemented in the auto ratelimit mitigation method.
+> You should manually set sleep second using the `sleepsec` param for  `PullPushAsync.__init__` 
+> following the above guidelines until it's implemented.
 
 ## basic usage & requirements
 you can install the package via pip
 ```shell
 pip install BAScraper
 ```
-Also, python 3.11+ is **needed** (`asyncio.TaskGroup` is used)
+Python 3.11+ is **needed** (`asyncio.TaskGroup` is used)
 
 **Example usage**
 ```python
@@ -81,37 +88,52 @@ result3 = asyncio.run(ppa.get_comments(subreddit='bluearchive',
 
   ### Legacy method `Pushpull` usage example
   ```python 
-  from BAScraper.BAScraper import Pushpull
-  import json
-  from datetime import datetime
+from BAScraper.BAScraper import Pushpull
+import json
+from datetime import datetime
 
-  pp = Pushpull(sleepsec=2, threads=2)
-  result = pp.get_submissions(after=datetime(2023, 12, 1), before=datetime(2024, 1, 1),
-                              subreddit='bluearchive', sort='desc')
+pp = Pushpull(sleepsec=2, threads=2)
+result = pp.get_submissions(after=datetime(2023, 12, 1), before=datetime(2024, 1, 1),
+                            subreddit='bluearchive', sort='desc')
 
-  # save result as JSON
-  with open("example.json", "w", encoding='utf-8') as outfile:
-      json.dump(result, outfile, indent=4)
+# save result as JSON
+with open("example.json", "w", encoding='utf-8') as outfile:
+    json.dump(result, outfile, indent=4)
   ```
   parameters are mostly the same, I put it in the [Pushpull_params_old.md](/Pushpull_params_old.md) just in case
 </details>
+
+> [!NOTE]
+> When using multiple requests, (as in multiple functions under `PullPushAsync`)
+> it is highly recommended to use all the functions under the same class 
+> because all the request pool related variables would be shared in that case.
+> 
+> Also, when re-running scripts using this, pools recording the request status is reset every time. 
+> so keep in mid that unexpected soft/hard rate limits may occur when frequently (re-)running scripts.
+> consider waiting a few minutes or seconds before running scripts if needed.
+
+> [!WARNING]
+> One possible problem when using filters is the premature termination of request chains. (none reported yet)
+> it's due to the logic of determining when to end requests which was not expected.
+> if requests are ending earlier than expected or only certain date segments are returned, 
+> consider removing filters or search restrictions and filter them after fetching all the results.
 
 # Parameters
 ## `PullPushAsync.__init__`
 all parameters are optional
 
-| parameter        | type  | description                                                                                                                                            | default value                     |
-|------------------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------|
-| sleepsec         | `int` | cooldown time between each request                                                                                                                     | 1                                 |
-| backoffsec       | `int` | backoff time for each failed request                                                                                                                   | 3                                 |
-| max_retries      | `int` | number of retries for failed requests before it gives up                                                                                               | 5                                 |
-| timeout          | `int` | time until it's considered as timout err                                                                                                               | 10                                |
-| pace_mode        | `str` | one of 'auto-soft', 'auto-hard', 'manual'. sets the pace to mitigate rate-limiting. (mostly meaningless)                                               | 'auto-hard'                       |
-| save_dir         | `str` | directory to save the results, defaults to current directory                                                                                           | `os.getcwd()` (current directory) |
-| task_num         | `int` | number of async tasks to be made                                                                                                                       | 3                                 |
-| log_stream_level | `str` | sets the log level for logs streamed on the terminal                                                                                                   | 'INFO'                            |
-| log_level        | `str` | sets the log level for logging (file)                                                                                                                  | 'DEBUG'                           |
-| duplicate_action | `str` | one of 'keep_newest', 'keep_oldest', 'remove', 'keep_original', 'keep_removed'. decides what to do with duplicate entries (usually caused by deletion) | 'keep_newest'                     |
+| parameter        | type  | description                                                                                                                                                                               | default value                     |
+|------------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------|
+| sleepsec         | `int` | cooldown time between each request                                                                                                                                                        | 1                                 |
+| backoffsec       | `int` | backoff time for each failed request                                                                                                                                                      | 3                                 |
+| max_retries      | `int` | number of retries for failed requests before it gives up                                                                                                                                  | 5                                 |
+| timeout          | `int` | time until it's considered as timout err                                                                                                                                                  | 10                                |
+| pace_mode        | `str` | one of 'auto-soft', 'auto-hard', 'manual'. sets the pace to mitigate rate-limiting. ('auto-soft' and 'auto-hard' don't have any difference for now. still recommended to use 'auto-hard') | 'auto-hard'                       |
+| save_dir         | `str` | directory to save the results, defaults to current directory                                                                                                                              | `os.getcwd()` (current directory) |
+| task_num         | `int` | number of async tasks to be made                                                                                                                                                          | 3                                 |
+| log_stream_level | `str` | sets the log level for logs streamed on the terminal                                                                                                                                      | 'INFO'                            |
+| log_level        | `str` | sets the log level for logging (file)                                                                                                                                                     | 'DEBUG'                           |
+| duplicate_action | `str` | one of 'keep_newest', 'keep_oldest', 'remove', 'keep_original', 'keep_removed'. decides what to do with duplicate entries (usually caused by deletion)                                    | 'keep_newest'                     |
 
 ## `PullPushAsync.get_submissions` & `PullPushAsync.get_comments`
 All parameters are optional, please write all parameters as keyword-arguments(kwargs) as there are no set order for the parameters.
@@ -178,7 +200,9 @@ So the general structure looks like this (regardless of it being a submission or
   ...
 }
 ```
+
 if the `get_comments` parameter is set to `True` the returned result would look like this (for submissions)
+
 ```json
 {
   "21jh54": {
