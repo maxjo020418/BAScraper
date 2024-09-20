@@ -74,9 +74,11 @@ class Params:
         MAX_POOL_SOFT = 0
         MAX_POOL_HARD = 0
         REFILL_SECOND = 0
-        SUBMISSION_URI = ''
-        COMMENT_URI = ''
-        DIAGNOSTIC_URI = ''
+        SUBMISSION_URI = 'https://arctic-shift.photon-reddit.com/api/posts/'
+        COMMENT_URI = 'https://arctic-shift.photon-reddit.com/api/comments/'
+        SUBREDDIT_URI = ''
+        USER_URI = ''
+        DIAGNOSTIC_URI = 'https://status.arctic-shift.photon-reddit.com'
 
 
 def _process_params(service: Union["Params.PullPush", "Params.Arctic"],
@@ -187,15 +189,18 @@ async def make_request(service: Union["PullPushAsync", ], mode: str, **params) -
                 f"{coro_name} | ClientConnectionError: Retrying... Attempt {retries}/{service.max_retries}")
             await _request_sleep(service, service.backoff_sec * retries)  # backoff
 
-        except json.decoder.JSONDecodeError:
+        except (json.decoder.JSONDecodeError, aiohttp.client_exceptions.ContentTypeError) as err:
             retries += 1
             service.logger.warning(
-                f"{coro_name} | JSONDecodeError: Possible malformed response. Retrying... "
+                f"{err}\n{coro_name} | JSON Decode Error: Possible malformed response. Retrying... "
                 f"Attempt {retries}/{service.max_retries}")
             await _request_sleep(service, service.backoff_sec * retries)  # backoff
 
         except Exception as err:
-            raise Exception(f'{coro_name} | unexpected error: \n{err}')
+            retries += 1
+            service.logger.warning(f'{coro_name} | Unexpected error: \n{err} Retrying... '
+                                   f"Attempt {retries}/{service.max_retries}")
+            await _request_sleep(service, service.backoff_sec * retries)  # backoff
 
     service.logger.error(f'{coro_name} | failed request attempt. skipping...')
     return list()
