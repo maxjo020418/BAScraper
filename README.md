@@ -30,10 +30,10 @@ It stresses the server and can cause inconvenience for everyone.
 > - for 1000+ requests: 3.6 ~ 4 sec sleep per request
 > 
 > rate limiting will automatically pace your request's response time to meet the following hard limits. 
-> But `pace_mode` would still do cool downs just in case. Following the pacing time above is recommended.
+> But `pace_mode` would still do cooldowns just in case. Following the pacing time above is recommended.
 
 > [!WARNING]
-> The long-term hard ratelimit of 1000 req/hr is not implemented in the auto ratelimit mitigation method.
+> The long-term hard ratelimit of 1000 req/hr is not implemented in the auto ratelimit mitigation cooldowns.
 > You should manually set sleep second using the `sleepsec` param for  `PullPushAsync.__init__` 
 > following the above guidelines until it's implemented.
 
@@ -109,14 +109,14 @@ with open("example.json", "w", encoding='utf-8') as outfile:
 > because all the request pool related variables would be shared in that case.
 > 
 > Also, when re-running scripts using this, pools recording the request status is reset every time. 
-> so keep in mid that unexpected soft/hard rate limits may occur when frequently (re-)running scripts.
-> consider waiting a few minutes or seconds before running scripts if needed.
+> So keep in mind that unexpected soft/hard rate limits may occur when frequently (re-)running scripts.
+> Consider waiting a few minutes or seconds before running scripts if needed.
 
 > [!WARNING]
 > One possible problem when using filters is the premature termination of request chains. (none reported yet)
-> it's due to the logic of determining when to end requests which was not expected.
-> if requests are ending earlier than expected or only certain date segments are returned, 
-> consider removing filters or search restrictions and filter them after fetching all the results.
+> It's due to the logic of determining when to end requests which was not expected.
+> If requests are ending earlier than expected or only certain date segments are returned, 
+> consider removing filters or search restrictions. After that, filter them after fetching all the results.
 
 # Parameters
 ## `PullPushAsync.__init__`
