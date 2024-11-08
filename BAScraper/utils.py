@@ -1,8 +1,9 @@
-from datetime import datetime, date
-import os.path
+from datetime import datetime
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Union, List, AnyStr
 from time import perf_counter
+from urllib.parse import urljoin
+import os.path
 import asyncio
 import aiohttp
 import json
@@ -23,9 +24,12 @@ class Params:
         MAX_POOL_SOFT = 15
         MAX_POOL_HARD = 30
         REFILL_SECOND = 60
-        SUBMISSION_URI = 'https://api.pullpush.io/reddit/search/submission/'
-        COMMENT_URI = 'https://api.pullpush.io/reddit/search/comment/'
-        DIAGNOSTIC_URI = "https://api.pullpush.io/ping"
+
+        BASE = 'https://api.pullpush.io'
+        DIAGNOSTIC = urljoin(BASE, "ping")
+        
+        SUBMISSION = urljoin(BASE, 'reddit/search/submission/')
+        COMMENT = urljoin(BASE, 'reddit/search/comment/')
 
         @staticmethod
         def assert_op(val: str) -> bool:
@@ -71,14 +75,60 @@ class Params:
 
     @dataclass
     class Arctic:
+        # constants settings
+        # rate limit metrics as of Jul 20th 2024
+        # `X-RateLimit-Remaining` header needs to be checked!
         MAX_POOL_SOFT = 0
         MAX_POOL_HARD = 0
         REFILL_SECOND = 0
-        SUBMISSION_URI = 'https://arctic-shift.photon-reddit.com/api/posts/'
-        COMMENT_URI = 'https://arctic-shift.photon-reddit.com/api/comments/'
-        SUBREDDIT_URI = ''
-        USER_URI = ''
-        DIAGNOSTIC_URI = 'https://status.arctic-shift.photon-reddit.com'
+
+        BASE = 'https://arctic-shift.photon-reddit.com/api'
+        DIAGNOSTIC = 'https://status.arctic-shift.photon-reddit.com'
+
+        # ================================================================
+
+        SUBMISSION_BASE = urljoin(BASE, 'api/posts')
+        COMMENT_BASE = urljoin(BASE, 'api/comments')
+        
+        SUBMISSION_SEARCH = urljoin(SUBMISSION_BASE, 'search')
+        SUBMISSION_ID = urljoin(SUBMISSION_BASE, 'ids')
+        SUBMISSION_AGG = urljoin(SUBMISSION_BASE, 'aggregate')
+
+        COMMENT_SEARCH = urljoin(COMMENT_BASE, 'search')
+        COMMENT_ID = urljoin(COMMENT_BASE, 'ids')
+        COMMENT_AGG = urljoin(COMMENT_BASE, 'aggregate')
+        COMMENT_TREE = urljoin(COMMENT_BASE, 'tree')
+
+        # ================================================================
+
+        SUBREDDIT_BASE = urljoin(BASE, 'api/subreddits')
+        USER_BASE = urljoin(BASE, 'api/users')
+        
+        SUBREDDIT_ID = urljoin(SUBREDDIT_BASE, 'ids')
+        SUBREDDIT_SEARCH = urljoin(SUBREDDIT_BASE, 'search')
+
+        USER_ID = urljoin(USER_BASE, 'ids')
+        USER_SEARCH = urljoin(USER_BASE, 'search')
+        USER_AGG_FLAIRS = urljoin(USER_BASE, 'aggregate_flairs')
+
+        USER_INTERACTIONS = urljoin(USER_BASE, 'interactions')  # sub-base, cannot be used standalone
+        USER_INTERACTIONS_USR = urljoin(USER_INTERACTIONS, 'users')
+        USER_INTERACTIONS_USR_LIST = urljoin(USER_INTERACTIONS_USR, 'list')
+        USER_INTERACTIONS_SUBREDDIT = urljoin(USER_INTERACTIONS, 'subreddits')
+
+        # ================================================================
+
+        '''
+        Full text search
+        For details, see https://www.postgresql.org/docs/current/textsearch-controls.html, 
+        specifically the websearch_to_tsquery function.
+        
+        But in short:
+        Word1 Word2 searches for Word1 and Word2, regardless of order
+        "Word1 Word2" searches for Word1 followed by Word2, possibly with other words in between
+        Word1 OR Word2 searches for Word1 or Word2
+        Word1 -Word2 searches for Word1 but not Word2
+        '''
 
 
 def _process_params(service: Union["Params.PullPush", "Params.Arctic"],
@@ -95,10 +145,10 @@ def _process_params(service: Union["Params.PullPush", "Params.Arctic"],
     # setting up the mode (whether it's for comments or submissions)
     if mode == 'comments':
         scheme = service.comment_params
-        uri_string = service.COMMENT_URI
+        uri_string = service.COMMENT
     elif mode == 'submissions':
         scheme = service.submission_params
-        uri_string = service.SUBMISSION_URI
+        uri_string = service.SUBMISSION
     else:
         raise Exception('wrong `mode` param for `_process_params`')
 
@@ -423,6 +473,7 @@ def split_range(epoch_low: int, epoch_high: int, n: int) -> List[list]:
         current_low = current_high + 1
 
     return ranges
+
 
 def save_json(service: Union["PullPushAsync", ], file_name: str, data: dict):
     service.logger.info('Saving result...')
