@@ -1,141 +1,26 @@
-from datetime import datetime
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Union, List, AnyStr
-from time import perf_counter
-from urllib.parse import urljoin
-import os.path
 import asyncio
-import aiohttp
 import json
-import time
+import os.path
 import re
+import time
+from datetime import datetime
+from time import perf_counter
+from typing import TYPE_CHECKING, Union, List
 
-import BAScraper.BAScraper
+import aiohttp
+
+from .services import Params
 
 if TYPE_CHECKING:  # prevent circular imports due to the `typing` module
     from BAScraper.BAScraper_async import PullPushAsync
 
 
-class Params:
-    @dataclass
-    class PullPush:
-        # constants settings
-        # rate limit metrics as of feb 9th 2023
-        MAX_POOL_SOFT = 15
-        MAX_POOL_HARD = 30
-        REFILL_SECOND = 60
-
-        BASE = 'https://api.pullpush.io'
-        DIAGNOSTIC = urljoin(BASE, "ping")
-        
-        SUBMISSION = urljoin(BASE, 'reddit/search/submission/')
-        COMMENT = urljoin(BASE, 'reddit/search/comment/')
-
-        @staticmethod
-        def assert_op(val: str) -> bool:
-            pattern = r"^(<|>)\d+$"
-            return True if re.match(pattern, val) else False
-
-        # schemes for the parameters
-        # {parameter : [accepted_type, assertion_func]} key, val pair
-        comment_params = {
-            'q': [str, None],
-            'ids': [list, None],
-            'size': [int, lambda x: x <= 100],
-            'sort': [str, lambda x: x in ["asc", "desc"]],
-            'sort_type': [str, lambda x: x in ["score", "num_comments", "created_utc"]],
-            'author': [str, None],
-            'subreddit': [str, None],
-            'after': [int, None],
-            'before': [int, None],
-            'link_id': [str, None]
-        }
-
-        submission_params = {
-            'ids': [list, None],
-            'q': [str, None],
-            'title': [str, None],
-            'selftext': [str, None],
-            'size': [int, lambda x: x <= 100],
-            'sort': [str, lambda x: x in ["asc", "desc"]],
-            'sort_type': [str, lambda x: x in ["score", "num_comments", "created_utc"]],
-            'author': [str, None],
-            'subreddit': [str, None],
-            'after': [int, None],
-            'before': [int, None],
-            'score': [str, assert_op],
-            'num_comments': [str, assert_op],
-            'over_18': [bool, None],
-            'is_video': [bool, None],
-            'locked': [bool, None],
-            'stickied': [bool, None],
-            'spoiler': [bool, None],
-            'contest_mode': [bool, None]
-        }
-
-    @dataclass
-    class Arctic:
-        # constants settings
-        # rate limit metrics as of Jul 20th 2024
-        # `X-RateLimit-Remaining` header needs to be checked!
-        MAX_POOL_SOFT = 0
-        MAX_POOL_HARD = 0
-        REFILL_SECOND = 0
-
-        BASE = 'https://arctic-shift.photon-reddit.com/api'
-        DIAGNOSTIC = 'https://status.arctic-shift.photon-reddit.com'
-
-        # ================================================================
-
-        SUBMISSION_BASE = urljoin(BASE, 'api/posts')
-        COMMENT_BASE = urljoin(BASE, 'api/comments')
-        
-        SUBMISSION_SEARCH = urljoin(SUBMISSION_BASE, 'search')
-        SUBMISSION_ID = urljoin(SUBMISSION_BASE, 'ids')
-        SUBMISSION_AGG = urljoin(SUBMISSION_BASE, 'aggregate')
-
-        COMMENT_SEARCH = urljoin(COMMENT_BASE, 'search')
-        COMMENT_ID = urljoin(COMMENT_BASE, 'ids')
-        COMMENT_AGG = urljoin(COMMENT_BASE, 'aggregate')
-        COMMENT_TREE = urljoin(COMMENT_BASE, 'tree')
-
-        # ================================================================
-
-        SUBREDDIT_BASE = urljoin(BASE, 'api/subreddits')
-        USER_BASE = urljoin(BASE, 'api/users')
-        
-        SUBREDDIT_ID = urljoin(SUBREDDIT_BASE, 'ids')
-        SUBREDDIT_SEARCH = urljoin(SUBREDDIT_BASE, 'search')
-
-        USER_ID = urljoin(USER_BASE, 'ids')
-        USER_SEARCH = urljoin(USER_BASE, 'search')
-        USER_AGG_FLAIRS = urljoin(USER_BASE, 'aggregate_flairs')
-
-        USER_INTERACTIONS = urljoin(USER_BASE, 'interactions')  # sub-base, cannot be used standalone
-        USER_INTERACTIONS_USR = urljoin(USER_INTERACTIONS, 'users')
-        USER_INTERACTIONS_USR_LIST = urljoin(USER_INTERACTIONS_USR, 'list')
-        USER_INTERACTIONS_SUBREDDIT = urljoin(USER_INTERACTIONS, 'subreddits')
-
-        # ================================================================
-
-        '''
-        Full text search
-        For details, see https://www.postgresql.org/docs/current/textsearch-controls.html, 
-        specifically the websearch_to_tsquery function.
-        
-        But in short:
-        Word1 Word2 searches for Word1 and Word2, regardless of order
-        "Word1 Word2" searches for Word1 followed by Word2, possibly with other words in between
-        Word1 OR Word2 searches for Word1 or Word2
-        Word1 -Word2 searches for Word1 but not Word2
-        '''
-
-
 def _process_params(service: Union["Params.PullPush", "Params.Arctic"],
-                    mode: str, **params) -> str:
+                    mode: str,
+                    **params) -> str:
     """
     :param service: type of service the processing will be based on
-    :param mode: mode as in whether it's for comments or submissions
+    :param mode: specifies what kind of reqeust from the service it would be
     :param params: all the params needed
     :return: string that contains the structured URI
 
@@ -175,19 +60,23 @@ def _process_params(service: Union["Params.PullPush", "Params.Arctic"],
     return uri_string + '?' + '&'.join([f'{k}={param2str(k, v)}' for k, v in params.items()])
 
 
-async def make_request(service: Union["PullPushAsync", ], mode: str, **params) -> List[Union[dict, None]]:
+async def make_request(service: Union["PullPushAsync", ],
+                       mode: str,
+                       **params) -> List[dict | None]:
     """
     :param service:
-        `PullPushAsync` or other top level object for `BAScraper` (`ArcticAsync` is planned).
+        `PullPushAsync` or other top level class for `BAScraper` (`ArcticAsync` is planned).
         will get all the user parameters(`sleepsec`, `retries`, etc.) from that object.
-    :param mode:
+    :param mode: specifies what kind of reqeust from the service it would be
     :param params: mode as in whether it's for comments or submissions (or perhaps other)
     :return: list of dict containing each submission/comments
     """
     coro_name = asyncio.current_task().get_name()
 
+    # import delayed to prevent circular import (used for `isinstance`)
+    from BAScraper.BAScraper_async import PullPushAsync
     match service:
-        case _ if isinstance(service, BAScraper.BAScraper_async.PullPushAsync):
+        case _ if isinstance(service, PullPushAsync):
             svc_type = Params.PullPush()
         case _:
             raise Exception(f'{service} -> No such service is supported')
@@ -256,7 +145,17 @@ async def make_request(service: Union["PullPushAsync", ], mode: str, **params) -
     return list()
 
 
-async def make_request_loop(service: Union["PullPushAsync", ], mode: str, **params) -> List[Union[dict, None]]:
+async def make_request_loop(service: Union["PullPushAsync", ],
+                            mode: str,
+                            **params) -> List[dict | None]:
+    """
+    params desc. are the same as `make_request`, check there for explanations.
+    this function is just a wrapper for `make_request` to do pagination.
+    :param service:
+    :param mode:
+    :param params:
+    :return:
+    """
     coro_name = asyncio.current_task().get_name()
 
     def temp_save(data):
@@ -268,11 +167,12 @@ async def make_request_loop(service: Union["PullPushAsync", ], mode: str, **para
             json.dump(data, f, indent=4)
             service.logger.debug(f'Saved temp file at {temp_fp}')
 
-    match service:
-        case _ if isinstance(service, BAScraper.BAScraper_async.PullPushAsync):
-            svc_type = Params.PullPush()
-        case _:
-            raise Exception(f'{type(service)} no such service is supported')
+    #
+    # match service:
+    #     case _ if isinstance(service, BAScraper.BAScraper_async.PullPushAsync):
+    #         svc_type = Params.PullPush()
+    #     case _:
+    #         raise Exception(f'{type(service)} no such service is supported')
 
     assert 'after' in params and 'before' in params, \
         'for `make_request_loop` to work, it needs to have both `after` and `before` in the params'
@@ -299,7 +199,8 @@ async def make_request_loop(service: Union["PullPushAsync", ], mode: str, **para
 # ======== supporting utility functions ========
 
 
-async def _request_sleep(service: Union["PullPushAsync", ], sleep_sec: float = None) -> None:
+async def _request_sleep(service: Union["PullPushAsync", ],
+                         sleep_sec: float = None) -> None:
     # in case of manual override
     sleep_sec = service.sleep_sec if sleep_sec is None else sleep_sec
 
@@ -340,7 +241,9 @@ async def _request_sleep(service: Union["PullPushAsync", ], sleep_sec: float = N
             raise Exception(f'Wrong variable for `mode`!')
 
 
-def preprocess_json(service: Union["PullPushAsync", ], obj: List[dict], index: str = 'id') -> dict:
+def preprocess_json(service: Union["PullPushAsync", ],
+                    obj: List[dict],
+                    index: str = 'id') -> dict:
     """
     :param service:
     :param obj:
@@ -475,7 +378,9 @@ def split_range(epoch_low: int, epoch_high: int, n: int) -> List[list]:
     return ranges
 
 
-def save_json(service: Union["PullPushAsync", ], file_name: str, data: dict):
+def save_json(service: Union["PullPushAsync", ],
+              file_name: str,
+              data: dict) -> None:
     service.logger.info('Saving result...')
 
     # Ensure the file has the correct extension

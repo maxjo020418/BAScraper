@@ -1,20 +1,19 @@
-import requests
-import time
-import logging
 import json
-import re
-
-from dataclasses import dataclass
-from typing import List
-from datetime import datetime
-
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from queue import Queue
-
+import logging
 import os
-from threading import Lock, RLock
 import pprint
+import re
+import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from datetime import datetime
+from queue import Queue
+from threading import RLock
+from typing import List
+
+import requests
+
 pretty = pprint.PrettyPrinter(indent=4).pprint
 
 # imports no longer used
