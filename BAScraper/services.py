@@ -1,6 +1,8 @@
 import re
 from dataclasses import dataclass
 from urllib.parse import urljoin
+from datetime import datetime
+# from typing import List
 
 
 class Params:
@@ -23,53 +25,51 @@ class Params:
             pattern = r"^(<|>)\d+$"
             return True if re.match(pattern, val) else False
 
+        @staticmethod
+        def define_param(param_type, assertion=None):
+            return {'type': param_type, 'assert': assertion}
+
         # schemes for the parameters
-        # {parameter : [accepted_type, assertion_func]} key, val pair
-        comment_params = {
-            'q': [str, None],
-            'ids': [list, None],
-            'size': [int, lambda x: x <= 100],
-            'sort': [str, lambda x: x in ["asc", "desc"]],
-            'sort_type': [str, lambda x: x in ["score", "num_comments", "created_utc"]],
-            'author': [str, None],
-            'subreddit': [str, None],
-            'after': [int, None],
-            'before': [int, None],
-            'link_id': [str, None]
+        # {parameter : {'type': accepted_type, 'assert': assertion_func}} key, val pair
+        common_params = {
+            'q': define_param(str),
+            'ids': define_param(list),
+            'size': define_param(int, lambda x: x <= 100),
+            'sort': define_param(str, lambda x: x in ("asc", "desc")),
+            'sort_type': define_param(str, lambda x: x in ("score", "num_comments", "created_utc")),
+            'author': define_param(str),
+            'subreddit': define_param(str),
+            'after': define_param(int),
+            'before': define_param(int),
         }
 
+        comment_params = {**common_params, 'link_id': define_param(str)}
+
         submission_params = {
-            'ids': [list, None],
-            'q': [str, None],
-            'title': [str, None],
-            'selftext': [str, None],
-            'size': [int, lambda x: x <= 100],
-            'sort': [str, lambda x: x in ["asc", "desc"]],
-            'sort_type': [str, lambda x: x in ["score", "num_comments", "created_utc"]],
-            'author': [str, None],
-            'subreddit': [str, None],
-            'after': [int, None],
-            'before': [int, None],
-            'score': [str, assert_op],
-            'num_comments': [str, assert_op],
-            'over_18': [bool, None],
-            'is_video': [bool, None],
-            'locked': [bool, None],
-            'stickied': [bool, None],
-            'spoiler': [bool, None],
-            'contest_mode': [bool, None]
+            **common_params,
+            'title': define_param(str),
+            'selftext': define_param(str),
+            'score': define_param(str, assert_op),
+            'num_comments': define_param(str, assert_op),
+            'over_18': define_param(bool),
+            'is_video': define_param(bool),
+            'locked': define_param(bool),
+            'stickied': define_param(bool),
+            'spoiler': define_param(bool),
+            'contest_mode': define_param(bool),
         }
 
     @dataclass
-    class Arctic:
+    class ArcticShift:
         # constants settings
         # rate limit metrics as of Jul 20th 2024
         # `X-RateLimit-Remaining` header needs to be checked!
+        # POOL related parameters are not used here
         MAX_POOL_SOFT = 0
         MAX_POOL_HARD = 0
         REFILL_SECOND = 0
 
-        BASE = 'https://arctic-shift.photon-reddit.com/api'
+        BASE = 'https://arctic-shift.photon-reddit.com'
         DIAGNOSTIC = 'https://status.arctic-shift.photon-reddit.com'
 
         # ================================================================
@@ -117,4 +117,168 @@ class Params:
         Word1 -Word2 searches for Word1 but not Word2
         '''
 
+        # ================================================================
 
+        common_fields = [
+            'author',
+            'author_fullname',
+            'author_flair_text',
+            'created_utc',
+            'distinguished',
+            'id',
+            'retrieved_on',
+            'subreddit',
+            'subreddit_id',
+            'score'
+        ]
+
+        post_fields = [
+            'crosspost_parent',
+            'link_flair_text',
+            'num_comments',
+            'over_18',
+            'post_hint',
+            'selftext',
+            'spoiler',
+            'title',
+            'url'
+        ] + common_fields
+
+        comment_fields = [
+            'body', 'link_id', 'parent_id'
+        ] + common_fields
+
+        subreddit_fields = [  # doesn't rely on `common_fields`
+            'created_utc',
+            'description',
+            'public_description',
+            'display_name',
+            'id',
+            'over18',
+            'retrieved_on',
+            'subscribers',
+            'title',
+            '_meta'
+        ]
+
+        # ================================================================\
+
+        @staticmethod
+        def is_iso8601(s: str) -> bool:
+            try:
+                datetime.fromisoformat(s)
+                return True
+            except ValueError:
+                return False
+
+        @staticmethod
+        def define_param(param_type, assertion=None, required=False, modifications=None, reliance=None):
+            return {
+                'type': param_type,
+                'assert': assertion,
+                'required': required,
+                'modifications': modifications,
+                'reliance': reliance,
+            }
+
+        """
+        Schemes for the parameters
+        key, val pair:
+        {parameter: {'type': accepted_type, 
+                    'assert': assertion_func -> return True for OK, False for FAIL, 
+                    'required': bool, 
+                    'modifications': func_or_none, 
+                    'reliance': func_or_none(params) input as all input params}
+        }
+        """
+
+        # for posts, comments, subreddits, users
+        id_search_params = {
+            'ids': define_param(list, lambda x: len(x) <= 500, True),
+            'md2html': define_param(bool),
+            'fields': define_param(list),
+        }
+
+        # regular search for posts, comments
+        search_common_params = {
+            'author': define_param(str),
+            'subreddit': define_param(str),
+            'author_flair_text': define_param(str),
+            'after': define_param(str, is_iso8601),  # ISO 8601
+            'before': define_param(str, is_iso8601),  # ISO 8601
+            # do recommend 'auto', limit = 0 FOR AUTO!
+            'limit': define_param(int, lambda x: 0 <= x <= 100, False, lambda x: 'auto' if x == 0 else x),
+            'sort': define_param(str, lambda x: x in ('asc', 'desc')),
+            'md2html': define_param(bool),
+        }
+
+        post_search_params = {
+            **search_common_params,
+            'crosspost_parent_id': define_param(str),
+            'over_18': define_param(bool),
+            'spoiler': define_param(bool),
+            'title': define_param(str),
+            'selftext': define_param(str),
+            'link_flair_text': define_param(str),
+            'query': define_param(str),  # search for both title and selftext
+            'url': define_param(str),  # content url prefix match such as YouTube or imgur
+            'url_exact': define_param(bool),  # if exact match of above url field is going to be used
+            # IDE spits shit when not specifying full path for some reason
+            'fields': define_param(list, lambda x: all([x for x in Params.ArcticShift.post_fields])),
+        }
+
+        comment_search_params = {
+            **search_common_params,
+            # may not be supported for very active users -> give warning prompt
+            'body': define_param(str, reliance=lambda params: any([needed in params
+                                                                   for needed in
+                                                                   ('author', 'subreddit', 'link_id', 'parent_id')])),
+            # this is for comments under a post
+            'link_id': define_param(str),
+            'parent_id': define_param(str),
+            # IDE spits shit when not specifying full path for some reason
+            'fields': define_param(list, lambda x: all([x for x in Params.ArcticShift.comment_fields])),
+        }
+
+        # get a comment tree
+        comment_tree_params = {
+            'link_id': define_param(str, required=True),
+            # all comments if not specified
+            'parent_id': define_param(str),
+            # just use a large number to return all
+            'limit': define_param(int, lambda x: 1 <= x),
+            # for comment collapse thresh, but doesn't seem to do anything?
+            'start_breadth': define_param(int, lambda x: 0 <= x),
+            'start_depth': define_param(int, lambda x: 0 <= x),
+            'md2html': define_param(bool),
+            # IDE spits shit when not specifying full path for some reason
+            'fields': define_param(list, lambda x: all([x for x in Params.ArcticShift.post_fields])),
+        }
+
+        # aggregation (group by) for comment and posts
+        agg_params = {
+            
+        }
+
+        subreddits_params = {
+
+        }
+
+        # user related params (regular search, interactions and flairs
+        users_params = {
+
+        }
+
+        # works for both `/api/users/interactions/users` and `/api/users/interactions/users/list`
+        # `/list` lists all the individual interactions rather than aggregating them
+        users_interactions_users = {
+
+        }
+
+        users_interactions_subreddits = {
+
+        }
+
+        users_agg_flairs = {
+
+        }

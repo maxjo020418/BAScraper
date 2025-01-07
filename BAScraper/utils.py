@@ -6,18 +6,21 @@ import time
 from datetime import datetime
 from time import perf_counter
 from typing import TYPE_CHECKING, Union, List
+from inspect import isfunction
+from urllib.parse import urlencode
 
 import aiohttp
 
 from .services import Params
 
 if TYPE_CHECKING:  # prevent circular imports due to the `typing` module
-    from BAScraper.BAScraper_async import PullPushAsync
+    from BAScraper.BAScraper_async import PullPushAsync, ArcticShiftAsync
 
 
-def _process_params(service: Union["Params.PullPush", "Params.Arctic"],
-                    mode: str,
-                    **params) -> str:
+# TODO: give appropriate Exception classes for all the base exceptions
+def _param_encoder(service: Union["Params.PullPush", "Params.ArcticShift"],
+                   mode: str,
+                   **params) -> str:
     """
     :param service: type of service the processing will be based on
     :param mode: specifies what kind of reqeust from the service it would be
@@ -26,6 +29,12 @@ def _process_params(service: Union["Params.PullPush", "Params.Arctic"],
 
     check `URI_params.md` for accepted parameters and more details
     """
+    def param2str(param_k, param_v) -> str:
+        # for when the param is 'ids' (List[str])
+        if isinstance(param_v, list):
+            return f'{param_k}={','.join(param_v)}'
+        # if `param` is `bool`, the resulting string would be 'True', 'False' not 'true', 'false' we want
+        return f'{param_k}={str(param_v).lower() if isinstance(param_v, bool) else str(param_v)}'
 
     # setting up the mode (whether it's for comments or submissions)
     if mode == 'comments':
@@ -35,32 +44,37 @@ def _process_params(service: Union["Params.PullPush", "Params.Arctic"],
         scheme = service.submission_params
         uri_string = service.SUBMISSION
     else:
-        raise Exception('wrong `mode` param for `_process_params`')
+        raise Exception('wrong `mode` param for `_param_encoder`')
 
-    # assertion stuffs using the `submission_params` and `comment_params`
+    # assertion stuffs for all the params
+    # TODO: assertions may differ from services - multiple types may be allowed in arctic shift, also, required params!
+    #   special fields(assertions required) for arctic include: limit, body,
+
+    # going to remove elems if required param exists
+    required_params = [k for k in scheme.keys() if k['required']]
+
     for k, v in params.items():
-        if (dat := scheme.get(k)) is not None:
-            assert isinstance(v, dat[0]), f'{k} Param "{v}" should be {dat[0]}'
-            if dat[1] is not None:
-                assert dat[1](v), f"Param \"{k}: {v}\" doesn't meet or satisfy the requirements"
+        if (requirements := scheme.get(k)) is not None:
+            assert isinstance(v, requirements['type']), f'{k} Param "{v}" should be {requirements['type']}'
+            if (assertion_func := requirements.get('assert')) is not None:  # custom assertion functions
+                assert assertion_func(v), f"Param \"{k}: {v}\" doesn't satisfy the requirements"
+            if requirements['required']:  # requirements check
+                required_params.remove(k)
+            if (mod_func := requirements.get('modifications')) is not None:  # special modifiers
+                params[k] = mod_func(v)
+            if (reliance_func := requirements.get('reliance')) is not None:
+                assert reliance_func(params), f'Param "{k}" has wrong reliance relations'
         else:
-            raise Exception(f'\"{k}: {v}\" is not accepted as a parameter')
+            raise Exception(f'"{k}" is not an accepted parameter')
 
     # empty `params` don't need the URI parts after, so just return
     if len(params) <= 0:
         return uri_string
 
-    def param2str(param_k, param_v) -> str:
-        # for when the param is 'ids' (List[str])
-        if param_k == 'ids':
-            return ','.join(param_v)
-        # if `param` is `bool`, the resulting string would be 'True', 'False' not 'true', 'false' we want
-        return str(param_v).lower() if isinstance(param_v, bool) else str(param_v)
-
-    return uri_string + '?' + '&'.join([f'{k}={param2str(k, v)}' for k, v in params.items()])
+    return uri_string + '?' + '&'.join([param2str(k, v) for k, v in params.items()])
 
 
-async def make_request(service: Union["PullPushAsync", ],
+async def make_request(service: Union["PullPushAsync", "ArcticShiftAsync"],
                        mode: str,
                        **params) -> List[dict | None]:
     """
@@ -74,14 +88,15 @@ async def make_request(service: Union["PullPushAsync", ],
     coro_name = asyncio.current_task().get_name()
 
     # import delayed to prevent circular import (used for `isinstance`)
-    from BAScraper.BAScraper_async import PullPushAsync
-    match service:
-        case _ if isinstance(service, PullPushAsync):
-            svc_type = Params.PullPush()
-        case _:
-            raise Exception(f'{service} -> No such service is supported')
+    from BAScraper.BAScraper_async import PullPushAsync, ArcticShiftAsync
+    if isinstance(service, PullPushAsync):
+        svc_type = Params.PullPush()
+    elif isinstance(service, ArcticShiftAsync):
+        svc_type = Params.ArcticShift()
+    else:
+        raise Exception(f'{service} -> No such service is supported')
 
-    uri = _process_params(svc_type, mode, **params)
+    uri = _param_encoder(svc_type, mode, **params)
 
     retries = 0
     while retries < service.max_retries:
@@ -145,7 +160,7 @@ async def make_request(service: Union["PullPushAsync", ],
     return list()
 
 
-async def make_request_loop(service: Union["PullPushAsync", ],
+async def make_request_loop(service: Union["PullPushAsync", "ArcticShiftAsync"],
                             mode: str,
                             **params) -> List[dict | None]:
     """
@@ -199,7 +214,7 @@ async def make_request_loop(service: Union["PullPushAsync", ],
 # ======== supporting utility functions ========
 
 
-async def _request_sleep(service: Union["PullPushAsync", ],
+async def _request_sleep(service: Union["PullPushAsync", "ArcticShiftAsync"],
                          sleep_sec: float = None) -> None:
     # in case of manual override
     sleep_sec = service.sleep_sec if sleep_sec is None else sleep_sec
@@ -241,7 +256,7 @@ async def _request_sleep(service: Union["PullPushAsync", ],
             raise Exception(f'Wrong variable for `mode`!')
 
 
-def preprocess_json(service: Union["PullPushAsync", ],
+def preprocess_json(service: Union["PullPushAsync", "ArcticShiftAsync"],
                     obj: List[dict],
                     index: str = 'id') -> dict:
     """
@@ -378,7 +393,7 @@ def split_range(epoch_low: int, epoch_high: int, n: int) -> List[list]:
     return ranges
 
 
-def save_json(service: Union["PullPushAsync", ],
+def save_json(service: Union["PullPushAsync", "ArcticShiftAsync"],
               file_name: str,
               data: dict) -> None:
     service.logger.info('Saving result...')

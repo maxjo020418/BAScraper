@@ -341,3 +341,63 @@ class PullPushAsync:
             else:
                 pass
                 # self.temp_dir.cleanup()
+
+
+class ArcticShiftAsync:
+    def __init__(self,
+                 sleep_sec: float = 1,
+                 backoff_sec: float = 3,
+                 max_retries: int = 5,
+                 timeout: float = 10,
+                 save_dir=os.getcwd(),
+                 task_num=3,
+                 log_stream_level: str = 'INFO',
+                 log_level: str = 'DEBUG',
+                 duplicate_action: str = 'keep_newest',
+                 ) -> None:
+
+        # declaring service type, for all pre-configured variables, params and stuffs
+        self.SERVICE = Params.ArcticShift
+
+        # self.sleep_sec = sleep_sec
+        # self.backoff_sec = backoff_sec
+        self.max_retries = max_retries
+        self.timeout = timeout
+        self.save_dir = save_dir
+        self.task_num = task_num
+
+        assert duplicate_action in ['keep_newest', 'keep_oldest', 'remove', 'keep_original', 'keep_removed'], \
+            ("`duplicate_action` should be one of "
+             "['keep_newest', 'keep_oldest', 'remove', 'keep_original', 'keep_removed']")
+        self.duplicate_action = duplicate_action
+
+        # logger stuffs
+        log_levels = ['NOTSET', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        assert log_stream_level in log_levels and log_level in log_levels, \
+            '`log_level` should be a string representation of logging level such as `INFO`'
+
+        self.logger = logging.getLogger(__name__)
+        logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s: %(message)s',
+                            filename=os.path.join(self.save_dir, 'request_log.log'),
+                            filemode='w',
+                            level=log_level)
+
+        # log stream stuffs for terminal
+        # Add a new handler only if no handlers are present
+        # prevents multiple instances from forming when PullPushAsync instance is made more than once
+        if not self.logger.handlers:
+            # create console logging handler and set level
+            ch = logging.StreamHandler()
+            ch.setLevel(log_stream_level)
+            ch.setFormatter(logging.Formatter('%(asctime)s: %(levelname)s - %(message)s'))
+            self.logger.addHandler(ch)
+
+        # Prevent logging from propagating to the root logger
+        # uncomment below to prevent logging stuff from the subprocesses (async functions)
+        # self.logger.propagate = False
+
+        # start timer for API pool refill
+        self.last_refilled = time.time()
+
+        # temp dir for storing received results
+        self.temp_dir: Union[TemporaryDirectory, None] = None
