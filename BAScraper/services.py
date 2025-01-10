@@ -5,7 +5,29 @@ from datetime import datetime
 # from typing import List
 
 
+def define_param(param_type, assertion=None, required=False, modifications=None, reliance=None):
+    return {
+        'type': param_type,
+        'assert': assertion,
+        'required': required,
+        'modifications': modifications,
+        'reliance': reliance,
+    }
+
+def is_iso8601(s: str) -> bool:
+    try:
+        datetime.fromisoformat(s)
+        return True
+    except ValueError:
+        return False
+
+def to_epoch(s:str) -> int:
+    dt = datetime.fromisoformat(s)
+    return int(dt.timestamp())
+
+
 class Params:
+
     @dataclass
     class PullPush:
         # constants settings
@@ -25,13 +47,9 @@ class Params:
             pattern = r"^(<|>)\d+$"
             return True if re.match(pattern, val) else False
 
-        @staticmethod
-        def define_param(param_type, assertion=None):
-            return {'type': param_type, 'assert': assertion}
-
         # schemes for the parameters
         # {parameter : {'type': accepted_type, 'assert': assertion_func}} key, val pair
-        common_params = {
+        _common_params = {
             'q': define_param(str),
             'ids': define_param(list),
             'size': define_param(int, lambda x: x <= 100),
@@ -39,14 +57,14 @@ class Params:
             'sort_type': define_param(str, lambda x: x in ("score", "num_comments", "created_utc")),
             'author': define_param(str),
             'subreddit': define_param(str),
-            'after': define_param(int),
-            'before': define_param(int),
+            'after': define_param(str, is_iso8601, modifications=to_epoch),
+            'before': define_param(str, is_iso8601, modifications=to_epoch),
         }
 
-        comment_params = {**common_params, 'link_id': define_param(str)}
+        comment_params = {**_common_params, 'link_id': define_param(str)}
 
         submission_params = {
-            **common_params,
+            **_common_params,
             'title': define_param(str),
             'selftext': define_param(str),
             'score': define_param(str, assert_op),
@@ -161,25 +179,7 @@ class Params:
             '_meta'
         ]
 
-        # ================================================================\
-
-        @staticmethod
-        def is_iso8601(s: str) -> bool:
-            try:
-                datetime.fromisoformat(s)
-                return True
-            except ValueError:
-                return False
-
-        @staticmethod
-        def define_param(param_type, assertion=None, required=False, modifications=None, reliance=None):
-            return {
-                'type': param_type,
-                'assert': assertion,
-                'required': required,
-                'modifications': modifications,
-                'reliance': reliance,
-            }
+        # ================================================================
 
         """
         Schemes for the parameters
@@ -200,7 +200,7 @@ class Params:
         }
 
         # regular search for posts, comments
-        search_common_params = {
+        _search_common_params = {
             'author': define_param(str),
             'subreddit': define_param(str),
             'author_flair_text': define_param(str),
@@ -213,7 +213,7 @@ class Params:
         }
 
         post_search_params = {
-            **search_common_params,
+            **_search_common_params,
             'crosspost_parent_id': define_param(str),
             'over_18': define_param(bool),
             'spoiler': define_param(bool),
@@ -228,8 +228,8 @@ class Params:
         }
 
         comment_search_params = {
-            **search_common_params,
-            # may not be supported for very active users -> give warning prompt
+            **_search_common_params,
+            # TODO: may not be supported for very active users -> give warning prompt when used
             'body': define_param(str, reliance=lambda params: any([needed in params
                                                                    for needed in
                                                                    ('author', 'subreddit', 'link_id', 'parent_id')])),
@@ -257,28 +257,62 @@ class Params:
 
         # aggregation (group by) for comment and posts
         agg_params = {
-            
+            'aggregate': define_param(str, lambda x: x in ('created_utc', 'author', 'subreddit'), True),
+            'frequency': define_param(str, required=False,
+                                      reliance=lambda params: params['aggregate'] == 'created_utc'),
+            'limit': define_param(int, lambda x: x >= 1),
+            'min_count': define_param(int, lambda x: x >= 0,
+                                      reliance=lambda params: params['aggregate'] != 'created_utc'),
+            'sort': define_param(str, lambda x: x in ('asc', 'desc')),
         }
 
         subreddits_params = {
-
+            'subreddit': define_param(str),
+            'subreddit_prefix': define_param(str),
+            'after': define_param(str, is_iso8601),
+            'before': define_param(str, is_iso8601),
+            'min_subscribers': define_param(int, lambda x: x >= 0),
+            'max_subscribers': define_param(int, lambda x: x >= 0),
+            'over18': define_param(bool),
+            'limit': define_param(int, lambda x: 1 <= x <= 1000),
+            'sort': define_param(str, lambda x: x in ('asc', 'desc')),
+            'sort_type': define_param(str, lambda x: x in ('created_utc', 'subscribers', 'subreddit')),
         }
 
         # user related params (regular search, interactions and flairs
         users_params = {
-
+            'author': define_param(str),
+            'author_prefix': define_param(str),
+            'min_num_posts': define_param(int, lambda x: x >= 0),
+            'min_num_comments': define_param(int, lambda x: x >= 0),
+            'active_since': define_param(str, is_iso8601),
+            'min_karma': define_param(int, lambda x: x >= 0),
+            'limit': define_param(int, lambda x: 1 <= x <= 1000),
+            'sort': define_param(str, lambda x: x in ('asc', 'desc')),
+            'sort_type': define_param(str, lambda x: x in ('author', 'total_karma')),
         }
 
         # works for both `/api/users/interactions/users` and `/api/users/interactions/users/list`
         # `/list` lists all the individual interactions rather than aggregating them
         users_interactions_users = {
-
+            'author': define_param(str, required=True),
+            'subreddit': define_param(str),
+            'after': define_param(str, is_iso8601),
+            'before': define_param(str, is_iso8601),
+            'min_count': define_param(int, lambda x: x >= 0),
+            'limit': define_param(int, lambda x: x >= 1),
         }
 
         users_interactions_subreddits = {
-
+            'author': define_param(str, required=True),
+            'weight_posts': define_param(float, lambda x: x >= 0),
+            'weight_comments': define_param(float, lambda x: x >= 0),
+            'before': define_param(str, is_iso8601),
+            'after': define_param(str, is_iso8601),
+            'min_count': define_param(int, lambda x: x >= 0),
+            'limit': define_param(int, lambda x: x >= 1),
         }
 
         users_agg_flairs = {
-
+            'author': define_param(str, required=True),
         }

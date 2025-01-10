@@ -540,38 +540,38 @@ class Pushpull:
 
         return 'single-mode'
 
-    @staticmethod
-    def is_deleted(json_obj) -> bool:
-        """
-        Check if a Reddit submission or comment is deleted.
-        :param json_obj: dict object representing the submission or comment
-        :return: `bool` indicating if the item is deleted or not
-
-        To be deleted the text needs to:
-         - start and end with [ ]
-         - be under 100 chars
-         - contain deleted or removed
-        Examples: '[Deleted By User]' '[removed]' '[Removed by Reddit]'
-        """
-        if any(json_obj.get(field) is not None for field in ['removed_by_category', 'removal_reason']):
-            return True
-
-        author = json_obj.get('author')
-        if author is None or (author.startswith('[') and author.endswith(']')):
-            return True
-
-        text_field = 'selftext' if json_obj.get('title') is not None else 'body'
-        text = json_obj.get(text_field, "")
-
-        if text == "" and not json_obj.get('title'):
-            return True
-
-        # Deleted or removed posts/comments often have specific text markers
-        if re.match(r"\[.*\]", text) and len(text) <= 100 and any(
-                term in text.lower() for term in ['deleted', 'removed']):
-            return True
-
-        return False
+    # @staticmethod
+    # def is_deleted(json_obj) -> bool:
+    #     """
+    #     Check if a Reddit submission or comment is deleted.
+    #     :param json_obj: dict object representing the submission or comment
+    #     :return: `bool` indicating if the item is deleted or not
+    #
+    #     To be deleted the text needs to:
+    #      - start and end with [ ]
+    #      - be under 100 chars
+    #      - contain deleted or removed
+    #     Examples: '[Deleted By User]' '[removed]' '[Removed by Reddit]'
+    #     """
+    #     if any(json_obj.get(field) is not None for field in ['removed_by_category', 'removal_reason']):
+    #         return True
+    #
+    #     author = json_obj.get('author')
+    #     if author is None or (author.startswith('[') and author.endswith(']')):
+    #         return True
+    #
+    #     text_field = 'selftext' if json_obj.get('title') is not None else 'body'
+    #     text = json_obj.get(text_field, "")
+    #
+    #     if text == "" and not json_obj.get('title'):
+    #         return True
+    #
+    #     # Deleted or removed posts/comments often have specific text markers
+    #     if re.match(r"\[.*\]", text) and len(text) <= 100 and any(
+    #             term in text.lower() for term in ['deleted', 'removed']):
+    #         return True
+    #
+    #     return False
 
     #######################################
     # worker functions for multithreading #

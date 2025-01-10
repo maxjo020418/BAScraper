@@ -6,8 +6,6 @@ import time
 from datetime import datetime
 from time import perf_counter
 from typing import TYPE_CHECKING, Union, List
-from inspect import isfunction
-from urllib.parse import urlencode
 
 import aiohttp
 
@@ -18,12 +16,13 @@ if TYPE_CHECKING:  # prevent circular imports due to the `typing` module
 
 
 # TODO: give appropriate Exception classes for all the base exceptions
-def _param_encoder(service: Union["Params.PullPush", "Params.ArcticShift"],
-                   mode: str,
-                   **params) -> str:
+def param_processor(service: Union["Params.PullPush", "Params.ArcticShift"],
+                    mode: str, to_uri: bool = True,
+                    **params) -> str | dict:
     """
     :param service: type of service the processing will be based on
     :param mode: specifies what kind of reqeust from the service it would be
+    :param to_uri: specifies whether to convert request to uri
     :param params: all the params needed
     :return: string that contains the structured URI
 
@@ -44,14 +43,15 @@ def _param_encoder(service: Union["Params.PullPush", "Params.ArcticShift"],
         scheme = service.submission_params
         uri_string = service.SUBMISSION
     else:
-        raise Exception('wrong `mode` param for `_param_encoder`')
+        raise Exception('wrong `mode` param for `param_processor`')
 
     # assertion stuffs for all the params
     # TODO: assertions may differ from services - multiple types may be allowed in arctic shift, also, required params!
     #   special fields(assertions required) for arctic include: limit, body,
 
     # going to remove elems if required param exists
-    required_params = [k for k in scheme.keys() if k['required']]
+    # if required_params is not empty in the end -> required params are not used, error
+    required_params = [k for k, v in scheme.items() if v['required']]
 
     for k, v in params.items():
         if (requirements := scheme.get(k)) is not None:
@@ -67,11 +67,15 @@ def _param_encoder(service: Union["Params.PullPush", "Params.ArcticShift"],
         else:
             raise Exception(f'"{k}" is not an accepted parameter')
 
-    # empty `params` don't need the URI parts after, so just return
-    if len(params) <= 0:
-        return uri_string
+    if len(required_params) > 0:  # if required_params is not empty
+        raise Exception(f'{required_params} are required!')
 
-    return uri_string + '?' + '&'.join([param2str(k, v) for k, v in params.items()])
+    if to_uri:
+        # empty `params` don't need the URI parts after, so just return
+        return uri_string if len(params) <= 0 \
+            else uri_string + '?' + '&'.join([param2str(k, v) for k, v in params.items()])
+    else:
+        return params
 
 
 async def make_request(service: Union["PullPushAsync", "ArcticShiftAsync"],
@@ -87,16 +91,16 @@ async def make_request(service: Union["PullPushAsync", "ArcticShiftAsync"],
     """
     coro_name = asyncio.current_task().get_name()
 
-    # import delayed to prevent circular import (used for `isinstance`)
-    from BAScraper.BAScraper_async import PullPushAsync, ArcticShiftAsync
-    if isinstance(service, PullPushAsync):
-        svc_type = Params.PullPush()
-    elif isinstance(service, ArcticShiftAsync):
-        svc_type = Params.ArcticShift()
-    else:
-        raise Exception(f'{service} -> No such service is supported')
+    # # import delayed to prevent circular import (used for `isinstance`)
+    # from BAScraper.BAScraper_async import PullPushAsync, ArcticShiftAsync
+    # if isinstance(service, PullPushAsync):
+    #     svc_type = Params.PullPush()
+    # elif isinstance(service, ArcticShiftAsync):
+    #     svc_type = Params.ArcticShift()
+    # else:
+    #     raise Exception(f'{service} -> No such service is supported')
 
-    uri = _param_encoder(svc_type, mode, **params)
+    uri = param_processor(service.SERVICE, mode, **params)
 
     retries = 0
     while retries < service.max_retries:
@@ -176,11 +180,17 @@ async def make_request_loop(service: Union["PullPushAsync", "ArcticShiftAsync"],
     def temp_save(data):
         # saving individual returned results
         temp_fp = os.path.join(service.temp_dir.name,
-                               f'{datetime.fromtimestamp(params['after']).strftime("%Y-%m-%d_%H-%M-%S")}__'
-                               f'{datetime.fromtimestamp(params['before']).strftime("%Y-%m-%d_%H-%M-%S")}.json')
+                               f'{params['after']}__'
+                               f'{params['before']}.json')
         with open(temp_fp, 'w+', encoding='utf-8') as f:
             json.dump(data, f, indent=4)
             service.logger.debug(f'Saved temp file at {temp_fp}')
+
+    def epoch_to_iso(epoch: str | int) -> str:  # returning results timestamp is epoch
+        if isinstance(epoch, int):
+            return datetime.fromtimestamp(epoch).isoformat()
+        else:
+            return epoch
 
     #
     # match service:
@@ -201,6 +211,7 @@ async def make_request_loop(service: Union["PullPushAsync", "ArcticShiftAsync"],
     # and the `before` param reverses along headed to the `after`
     while len(res) > 0 and params['after'] < params['before']:
         params['before'] = int(res[-1]['created_utc']) - 1
+        params['after'], params['before'] = epoch_to_iso(params['after']), epoch_to_iso(params['before'])
         service.logger.debug(f'{coro_name} | param info: {params['after']} -> {params['before']}')
         res = await make_request(service, mode, **params)
         temp_save(res)
@@ -375,7 +386,10 @@ def _is_deleted(obj: dict) -> bool:
     return False
 
 
-def split_range(epoch_low: int, epoch_high: int, n: int) -> List[list]:
+def split_range(iso_low: str, iso_high: str, n: int) -> List[list]:
+    epoch_low = int(datetime.fromisoformat(iso_low).timestamp())
+    epoch_high = int(datetime.fromisoformat(iso_high).timestamp())
+
     segment_size = (epoch_high - epoch_low + 1) // n
     remainder = (epoch_high - epoch_low + 1) % n
 
@@ -387,10 +401,14 @@ def split_range(epoch_low: int, epoch_high: int, n: int) -> List[list]:
         if remainder > 0:
             current_high += 1
             remainder -= 1
-        ranges.append([int(current_low), int(current_high)])
+        ranges.append([
+            datetime.fromtimestamp(current_low).isoformat(),
+            datetime.fromtimestamp(current_high).isoformat()
+        ])
         current_low = current_high + 1
 
     return ranges
+
 
 
 def save_json(service: Union["PullPushAsync", "ArcticShiftAsync"],

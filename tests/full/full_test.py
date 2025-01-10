@@ -6,13 +6,11 @@ import asyncio
 ppa = PullPushAsync(log_stream_level="DEBUG")
 
 print('TEST 1 - basic fetching')
-result1 = asyncio.run(ppa.get_submissions(subreddit='bluearchive',
-                                          after=datetime.timestamp(
-                                              datetime(2024, 7, 1)),
-                                          before=datetime.timestamp(
-                                             datetime(2024, 7, 8)),
-                                          file_name='result1'
-                                          ))
+result1 = asyncio.run(ppa.fetch(mode='submissions',
+                                subreddit='bluearchive',
+                                after='2024-07-01T00:00:00+09:00',
+                                before='2024-07-08T00:00:00+09:00',
+                                file_name='result1'))
 print('result1 len:', len(result1))
 
 # print('\nTEST 2 - basic fetching with comments')

@@ -60,7 +60,7 @@ class PullPushAsync:
         """
 
         # declaring service type, for all pre-configured variables, params and stuffs
-        self.SERVICE = Params.PullPush
+        self.SERVICE = Params.PullPush()
 
         assert pace_mode in ['auto-soft', 'auto-hard', 'manual']
         self.pace_mode = pace_mode
@@ -113,17 +113,10 @@ class PullPushAsync:
         # temp dir for storing received results
         self.temp_dir: Union[TemporaryDirectory, None] = None
 
-    async def get_submissions(self, file_name=None, get_comments=False, **params) -> Union[None, dict]:
-        """
-        :param file_name: file name to use for the saves json result. If `None`, doesn't save the file.
-        :param get_comments: if `True`, will also fetch comments belonging to the submission
-        :param params:
+    async def fetch(self, mode: str, get_comments=False, file_name=None, **params):
+        assert mode in ('comments', 'submissions'), "`mode` should be one of 'comments', 'submissions'"
 
-        if `after` and `before` both exists, it'll get all the stuff in-between
-        if only `after` exists, it'll get the `after` ~> current-time
-        if only `before` exists, it'll only make a single request (100 entries, newest starting from `before`)
-        if neither `after` nor `before` exists, it'll only make a single request (100 entries, newest)
-        """
+        # params = param_processor(self.SERVICE, mode, False, **params)
         single_request = False
 
         # basic parameter check
@@ -139,19 +132,29 @@ class PullPushAsync:
             self.task_num = 1
             self.logger.info('only `before` was detected for time parameters, making single request')
             single_request = True
+        elif (mode == 'comments') and ('link_id' in params):  # comment group fetch from submission (done in single request)
+            self.logger.debug('making `link_id` single request')
+            single_request = True
         else:  # both not in params
             self.task_num = 1
             self.logger.info('no time parameter was detected, making single request')
             single_request = True
 
+        # convert iso-8601 to epoch - PullPush uses epoch
+        def params_to_epoch(p):
+            if pa := p.get('after'):
+                p['after'] = int(datetime.fromisoformat(pa).timestamp())
+            if pb := p.get('before'):
+                p['before'] = int(datetime.fromisoformat(pb).timestamp())
+
         # temp dir for storing received results
-        self.temp_dir = TemporaryDirectory(prefix='BAScraper-submission-temp_', dir=self.save_dir, delete=False)
+        self.temp_dir = TemporaryDirectory(prefix=f'BAScraper-{mode}-temp_', dir=self.save_dir, delete=False)
         self.logger.debug(f'Temp directory created: {self.temp_dir.name}')
         exception_occurred = False
         try:
             if single_request:
                 self.logger.debug('Running request in single-coro-mode')
-                result = await make_request(self, 'submissions', **params)
+                result = await make_request(self, mode, **params)
                 result = preprocess_json(self, result)
             else:  # regular ranged request
                 # segment time is from oldest -> newest
@@ -161,7 +164,7 @@ class PullPushAsync:
                     seg_num = 1
                     for segment in segment_ranges:
                         params['after'], params['before'] = segment
-                        tasks.append(tg.create_task(make_request_loop(self, 'submissions', **params),
+                        tasks.append(tg.create_task(make_request_loop(self, mode, **params),
                                                     name=f'coro-{seg_num}'))
                         seg_num += 1
                 result = preprocess_json(self, [res for task in tasks for res in task.result()])
@@ -178,7 +181,7 @@ class PullPushAsync:
             raise err
 
         else:
-            if get_comments:
+            if mode == 'submissions' and get_comments:
                 self.logger.info('Starting comment fetching...')
                 submission_ids = asyncio.Queue()
                 for submission_id in result.keys():
@@ -191,7 +194,7 @@ class PullPushAsync:
                     submission.update({'comments': list()})
 
                 for comment in comments.values():
-                    # needs comment['link_id'][3:] due to 't3_' prefix for the ID
+                    # needs `comment['link_id'][3:]` due to 't3_' prefix for the ID
                     result[comment['link_id'][3:]]['comments'].append(comment)
 
             if file_name:
@@ -207,81 +210,6 @@ class PullPushAsync:
             else:
                 self.temp_dir.cleanup()
 
-    async def get_comments(self, file_name=None, **params) -> Union[None, dict]:
-        """
-        :param file_name: file name to use for the saves json result. If `None`, doesn't sava the file.
-        :param params:
-        :return:
-        """
-        single_request = False
-
-        # basic parameter check
-        if 'after' in params and 'before' in params:
-            assert params['after'] < params['before'], '`before` needs to be bigger than `after`'
-        elif 'after' in params and 'before' not in params:
-            assert params['after'] < int(time.time()), '`after` needs to be smaller than current time'
-            params['before'] = int(time.time())
-            self.logger.info(f'only `after` was detected for time parameters, '
-                             f'making requests until current time starting from '
-                             f'{datetime.fromtimestamp(params['after'])}')
-        elif 'after' not in params and 'before' in params:
-            self.task_num = 1
-            self.logger.info('only `before` was detected for time parameters, making single request')
-            single_request = True
-        elif 'link_id' in params:  # comment group fetch from submission (done in single request)
-            self.logger.debug('making `link_id` single request')
-            single_request = True
-        else:  # both not in params
-            self.task_num = 1
-            self.logger.info('no time parameter was detected, making single request')
-            single_request = True
-
-        # temp dir for storing received results
-        self.temp_dir = TemporaryDirectory(prefix='BAScraper-comment-temp_', dir=self.save_dir, delete=False)
-        self.logger.debug(f'Temp directory created: {self.temp_dir.name}')
-        exception_occurred = False
-        try:
-            if single_request:
-                self.logger.debug('Running request in single-coro-mode')
-                result = await make_request(self, 'comments', **params)
-                result = preprocess_json(self, result)
-            else:  # regular ranged request
-                # segment time is from oldest -> newest
-                segment_ranges = split_range(params['after'], params['before'], self.task_num)
-                async with asyncio.TaskGroup() as tg:
-                    tasks = list()
-                    seg_num = 1
-                    for segment in segment_ranges:
-                        params['after'], params['before'] = segment
-                        tasks.append(tg.create_task(make_request_loop(self, 'comments', **params),
-                                                    name=f'coro-{seg_num}'))
-                        seg_num += 1
-                result = preprocess_json(self, [res for task in tasks for res in task.result()])
-
-        except* (asyncio.exceptions.CancelledError, asyncio.CancelledError) as err:
-            self.logger.error(f'Task has been cancelled! : {err.exceptions}')
-            exception_occurred = True
-
-        except* (KeyboardInterrupt, SystemExit) as err:
-            self.logger.error(f'terminated by user or system! : {err.exceptions}')
-            exception_occurred = True
-
-        except* Exception as err:
-            raise err
-
-        else:
-            if file_name:
-                save_json(self, file_name, result)
-            return result
-
-        finally:
-            if exception_occurred:
-                self.logger.warning('Some errors occurred while fetching, '
-                                    f'preserving temp_dir as {self.temp_dir.name}')
-                # might add some extra actions here
-                return  # don't close/cleanup the `self.temp_dir`
-            else:
-                self.temp_dir.cleanup()
 
     async def _get_link_ids_comments(self, link_ids: asyncio.Queue) -> Union[dict, None]:
         """
@@ -357,7 +285,7 @@ class ArcticShiftAsync:
                  ) -> None:
 
         # declaring service type, for all pre-configured variables, params and stuffs
-        self.SERVICE = Params.ArcticShift
+        self.SERVICE = Params.ArcticShift()
 
         # self.sleep_sec = sleep_sec
         # self.backoff_sec = backoff_sec
