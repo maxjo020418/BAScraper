@@ -35,15 +35,9 @@ def param_processor(service: Union["Params.PullPush", "Params.ArcticShift"],
         # if `param` is `bool`, the resulting string would be 'True', 'False' not 'true', 'false' we want
         return f'{param_k}={str(param_v).lower() if isinstance(param_v, bool) else str(param_v)}'
 
-    # setting up the mode (whether it's for comments or submissions)
-    if mode == 'comments':
-        scheme = service.comment_params
-        uri_string = service.COMMENT
-    elif mode == 'submissions':
-        scheme = service.submission_params
-        uri_string = service.SUBMISSION
-    else:
-        raise Exception('wrong `mode` param for `param_processor`')
+    # setting up the mode (what to fetch, get base uri and parameter scheme)
+    scheme, base_uri_string = service.setup(mode)
+
 
     # assertion stuffs for all the params
     # TODO: assertions may differ from services - multiple types may be allowed in arctic shift, also, required params!
@@ -72,8 +66,8 @@ def param_processor(service: Union["Params.PullPush", "Params.ArcticShift"],
 
     if to_uri:
         # empty `params` don't need the URI parts after, so just return
-        return uri_string if len(params) <= 0 \
-            else uri_string + '?' + '&'.join([param2str(k, v) for k, v in params.items()])
+        return base_uri_string if len(params) <= 0 \
+            else base_uri_string + '?' + '&'.join([param2str(k, v) for k, v in params.items()])
     else:
         return params
 
@@ -90,15 +84,6 @@ async def make_request(service: Union["PullPushAsync", "ArcticShiftAsync"],
     :return: list of dict containing each submission/comments
     """
     coro_name = asyncio.current_task().get_name()
-
-    # # import delayed to prevent circular import (used for `isinstance`)
-    # from BAScraper.BAScraper_async import PullPushAsync, ArcticShiftAsync
-    # if isinstance(service, PullPushAsync):
-    #     svc_type = Params.PullPush()
-    # elif isinstance(service, ArcticShiftAsync):
-    #     svc_type = Params.ArcticShift()
-    # else:
-    #     raise Exception(f'{service} -> No such service is supported')
 
     uri = param_processor(service.SERVICE, mode, **params)
 
@@ -191,13 +176,6 @@ async def make_request_loop(service: Union["PullPushAsync", "ArcticShiftAsync"],
             return datetime.fromtimestamp(epoch).isoformat()
         else:
             return epoch
-
-    #
-    # match service:
-    #     case _ if isinstance(service, BAScraper.BAScraper_async.PullPushAsync):
-    #         svc_type = Params.PullPush()
-    #     case _:
-    #         raise Exception(f'{type(service)} no such service is supported')
 
     assert 'after' in params and 'before' in params, \
         'for `make_request_loop` to work, it needs to have both `after` and `before` in the params'
