@@ -168,7 +168,7 @@ class PullPushAsync:
                     seg_num = 1
                     for segment in segment_ranges:
                         params['after'], params['before'] = segment
-                        tasks.append(tg.create_task(make_request_loop(self, mode, **params),
+                        tasks.append(tg.create_task(make_request_time_pagination(self, mode, **params),
                                                     name=f'coro-{seg_num}'))
                         seg_num += 1
                 result = preprocess_json(self, [res for task in tasks for res in task.result()])
@@ -388,7 +388,7 @@ class ArcticShiftAsync:
                     seg_num = 1
                     for segment in segment_ranges:
                         params['after'], params['before'] = segment
-                        tasks.append(tg.create_task(make_request_loop(self, mode, **params),
+                        tasks.append(tg.create_task(make_request_time_pagination(self, mode, **params),
                                                     name=f'coro-{seg_num}'))
                         seg_num += 1
                 result = preprocess_json(self, [res for task in tasks for res in task.result()])

@@ -1,15 +1,27 @@
 import unittest
 from datetime import datetime, timedelta
 from BAScraper.BAScraper_async import PullPushAsync
+from BAScraper.BAScraper_async_new import PullPushAsync as PullPushAsync_new
 import asyncio
 
 ppa = PullPushAsync(log_stream_level="DEBUG")
+ppa_new = PullPushAsync_new(log_stream_level="DEBUG")
+
+# print('TEST 1 - basic fetching')
+# result1 = asyncio.run(ppa.fetch(mode='submissions',
+#                                 subreddit='bluearchive',
+#                                 get_comments=True,
+
+#                                 after='2024-07-01',
+#                                 before='2024-07-02',
+#                                 file_name='result1'))
+# print('result1 len:', len(result1))
 
 print('TEST 1 - basic fetching')
-result1 = asyncio.run(ppa.fetch(mode='submissions',
+result1 = asyncio.run(ppa_new.fetch(mode='submissions',
                                 subreddit='bluearchive',
                                 get_comments=True,
-                                #after='2024-07-01',
+                                after='2024-07-01',
                                 before='2024-07-02',
                                 file_name='result1'))
 print('result1 len:', len(result1))

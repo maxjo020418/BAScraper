@@ -149,12 +149,12 @@ async def make_request(service: Union["PullPushAsync", "ArcticShiftAsync"],
     return list()
 
 
-async def make_request_loop(service: Union["PullPushAsync", "ArcticShiftAsync"],
-                            mode: str,
-                            **params) -> List[dict | None]:
+async def make_request_time_pagination(service: Union["PullPushAsync", "ArcticShiftAsync"],
+                                       mode: str,
+                                       **params) -> List[dict | None]:
     """
     params desc. are the same as `make_request`, check there for explanations.
-    this function is just a wrapper for `make_request` to do pagination.
+    this function is just a wrapper for `make_request` to do auto-pagination based on after/before time.
     :param service:
     :param mode:
     :param params:
@@ -171,7 +171,7 @@ async def make_request_loop(service: Union["PullPushAsync", "ArcticShiftAsync"],
             json.dump(data, f, indent=4)
             service.logger.debug(f'Saved temp file at {temp_fp}')
 
-    def epoch_to_iso(epoch: str | int) -> str:  # returning results timestamp is epoch
+    def epoch_to_iso(epoch: str | int) -> str:
         if isinstance(epoch, int):
             return datetime.fromtimestamp(epoch).isoformat()
         else:

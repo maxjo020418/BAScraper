@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import logging
 import os
@@ -16,6 +17,7 @@ class BaseAsync:
                  timeout: float = 10,
                  save_dir=os.getcwd(),
                  task_num=3,
+                 comment_task_num=None,
                  log_stream_level: str = 'INFO',
                  log_level: str = 'DEBUG',
                  duplicate_action: str = 'keep_newest'):
@@ -25,6 +27,7 @@ class BaseAsync:
         self.timeout = timeout
         self.save_dir = save_dir
         self.task_num = task_num
+        self.comment_task_num = comment_task_num if comment_task_num is not None else task_num
 
         assert duplicate_action in ['keep_newest', 'keep_oldest', 'remove', 'keep_original', 'keep_removed'], \
             ("`duplicate_action` should be one of "
@@ -51,7 +54,7 @@ class BaseAsync:
         self.temp_dir: Union[TemporaryDirectory, None] = None
 
     async def fetch(self, mode: str, **params):
-        raise NotImplementedError("Subclasses must implement the `fetch` method.")
+        raise NotImplementedError("BaseAsync must implement the `fetch` method.")
 
     def create_temp_dir(self, mode):
         self.temp_dir = TemporaryDirectory(prefix=f'BAScraper-{mode}-temp_', dir=self.save_dir, delete=False)
@@ -60,6 +63,7 @@ class BaseAsync:
     def cleanup_temp_dir(self):
         if self.temp_dir:
             self.temp_dir.cleanup()
+
 
 class PullPushAsync(BaseAsync):
     def __init__(self, pace_mode: str = 'auto-hard', **kwargs):
@@ -71,15 +75,15 @@ class PullPushAsync(BaseAsync):
         self.pool_amount = self.max_pool
 
     async def fetch(self, mode: str, get_comments=False, file_name=None, **params):
-        is_single_request = self._validate_and_set_params(mode, params)
+        is_single_request = self._validate_and_set_params(params)
         self.create_temp_dir(mode)
         exception_occurred = False
         try:
             if is_single_request:
                 result = await make_request(self, mode, **params)
                 result = preprocess_json(self, result)
-            else:
-                result = await self._process_segments(mode, params)
+            else:  # loop through after segmentation
+                result = await self._multi_requests(mode, params)
 
             if mode == 'submissions' and get_comments:
                 result = await self._fetch_comments(result)
@@ -88,14 +92,23 @@ class PullPushAsync(BaseAsync):
                 save_json(self, file_name, result)
 
             return result
-        except Exception as err:
-            self.logger.error(f"Error during fetch: {err}")
+
+        except* (asyncio.exceptions.CancelledError, asyncio.CancelledError) as err:
+            self.logger.error(f'Task has been cancelled! : {err.exceptions}')
             exception_occurred = True
+
+        except* (KeyboardInterrupt, SystemExit) as err:
+            self.logger.error(f'terminated by user or system! : {err.exceptions}')
+            exception_occurred = True
+
+        except* Exception as err:
+            raise err
+
         finally:
             if not exception_occurred:
                 self.cleanup_temp_dir()
 
-    def _validate_and_set_params(self, mode, params):
+    def _validate_and_set_params(self, params: dict):
         is_single_request = False
         if 'after' in params and 'before' in params:
             assert iso_to_epoch(params['after']) < iso_to_epoch(params['before']), '`before` needs to be bigger than `after`'
@@ -110,29 +123,76 @@ class PullPushAsync(BaseAsync):
 
         return is_single_request
 
-    async def _process_segments(self, mode, params):
-        segment_ranges = split_range(params['after'], params['before'], self.task_num)
+    async def _multi_requests(self, mode: str, params: dict,
+                              # manual override parameters
+                              task_num: int = None,
+                              loop_elems: tuple[str, asyncio.Queue] = None) -> dict:
+        """
+        :param mode:
+        :param params:
+        :param task_num:
+        :param loop_elems:
+             tuple of [k: param to modify/add] and [v: list of values for that]
+        :return:
+
+        by default, it would loop through the dates to overcome the "returned results per request" limitations
+        if overridden via 'manual override parameters', would loop through based on loop_params
+        (based on the key value in the `params`)
+        """
+        task_num = task_num if task_num is not None else self.task_num
+        overridden = True if loop_elems is not None else False
+        loop_segments = loop_elems if overridden \
+            else split_range(params['after'], params['before'], task_num)
+            # segment time is from oldest -> newest for default
+
+        self.logger.debug(f'starting _multi_requests with task_num={task_num}')
+        if overridden:
+            self.logger.debug(f'_multi_requests was overridden by {loop_elems}')
+
         async with asyncio.TaskGroup() as tg:
-            tasks = [tg.create_task(make_request_loop(self, mode, after=start, before=end)) for start, end in segment_ranges]
+            tasks = list()
+            self.logger.debug(f'Segment ranges: {loop_segments}')
+            for seg_num in range(task_num):
+                if not overridden:  # for default settings
+                    params['after'], params['before'] = loop_segments[seg_num]
+                    self.logger.debug(f'coro-{seg_num + 1} | after: {params["after"]}, before: {params["before"]}')
+                    tasks.append(tg.create_task(make_request_time_pagination(self, mode, **params),
+                                                name=f'coro-{seg_num + 1}'))
+                else:  # overridden
+                    async def override_worker() -> list:
+                        coro_name = asyncio.current_task().get_name()
+                        res = list()
+                        q = loop_elems[1]
+                        k = loop_elems[0]
+                        while not q.empty():
+                            elem = await q.get()
+                            q.task_done()  # Mark the task as done (needed for asyncio.Queue consumers)
+                            params[k] = elem
+
+                            self.logger.debug(f'{coro_name} | custom param info: {k}: {elem}')
+                            res += await make_request(self, mode, **params)
+                            self.logger.info(f'{q.qsize()} items left')
+
+                        return res
+
+                    self.logger.debug(
+                        f'coro-{seg_num + 1} | custom param multi_req. ready for {loop_elems[0]}')
+                    tasks.append(tg.create_task(override_worker(), name=f'coro-{seg_num + 1}'))
+
         return preprocess_json(self, [res for task in tasks for res in task.result()])
 
     async def _fetch_comments(self, result):
+        self.logger.info(f'=== Fetching comments under submissions ===')
         submission_ids = asyncio.Queue()
-        for submission_id in result.keys():
+        for submission_id in result.keys():  # enqueue all the submission ids
             await submission_ids.put(submission_id)
-        comments = await self._get_link_ids_comments(submission_ids)
+        comments = await self._multi_requests('comments', {},
+                                              self.task_num, ('link_id', submission_ids))
         for submission in result.values():
             submission.update({'comments': []})
         for comment in comments.values():
             result[comment['link_id'][3:]]['comments'].append(comment)
         return result
-
-    async def _get_link_ids_comments(self, link_ids: asyncio.Queue):
-        res = []
-        while not link_ids.empty():
-            link_id = await link_ids.get()
-            res.append(await make_request(self, 'comments', link_id=link_id))
-        return preprocess_json(self, [comment for comments in res for comment in comments])
 
 class ArcticShiftAsync(BaseAsync):
     def __init__(self, **kwargs):
@@ -176,5 +236,5 @@ class ArcticShiftAsync(BaseAsync):
     async def _process_segments(self, mode, params):
         segment_ranges = split_range(params['after'], params['before'], self.task_num)
         async with asyncio.TaskGroup() as tg:
-            tasks = [tg.create_task(make_request_loop(self, mode, after=start, before=end)) for start, end in segment_ranges]
+            tasks = [tg.create_task(make_request_time_pagination(self, mode, after=start, before=end)) for start, end in segment_ranges]
         return preprocess_json(self, [res for task in tasks for res in task.result()])
