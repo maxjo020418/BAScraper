@@ -4,19 +4,21 @@ import os.path
 import re
 import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
+tz = ZoneInfo("UTC")
 from time import perf_counter
-from typing import TYPE_CHECKING, Union, List
+from typing import TYPE_CHECKING, List, TypeVar
 
 import aiohttp
 
-from .services import Params
-
 if TYPE_CHECKING:  # prevent circular imports due to the `typing` module
-    from BAScraper.BAScraper_async import PullPushAsync, ArcticShiftAsync
+    # from BAScraper.BAScraper_async import PullPushAsync, ArcticShiftAsync
+    from BAScraper_async import BaseAsync, PullPushAsync, ArcticShiftAsync
+    AsyncServices = TypeVar('AsyncServices', bound=BaseAsync)
 
 
 # TODO: give appropriate Exception classes for all the base exceptions
-def param_processor(service: Union["Params.PullPush", "Params.ArcticShift"],
+def param_processor(service: 'AsyncServices',
                     mode: str, to_uri: bool = True,
                     **params) -> str | dict:
     """
@@ -72,7 +74,7 @@ def param_processor(service: Union["Params.PullPush", "Params.ArcticShift"],
         return params
 
 
-async def make_request(service: Union["PullPushAsync", "ArcticShiftAsync"],
+async def make_request(service: 'AsyncServices',
                        mode: str,
                        **params) -> List[dict | None]:
     """
@@ -86,6 +88,7 @@ async def make_request(service: Union["PullPushAsync", "ArcticShiftAsync"],
     coro_name = asyncio.current_task().get_name()
 
     uri = param_processor(service.SERVICE, mode, **params)
+    service.logger.debug(f'uri: {uri}')
 
     retries = 0
     while retries < service.max_retries:
@@ -149,7 +152,7 @@ async def make_request(service: Union["PullPushAsync", "ArcticShiftAsync"],
     return list()
 
 
-async def make_request_time_pagination(service: Union["PullPushAsync", "ArcticShiftAsync"],
+async def make_request_time_pagination(service: 'AsyncServices',
                                        mode: str,
                                        **params) -> List[dict | None]:
     """
@@ -173,7 +176,7 @@ async def make_request_time_pagination(service: Union["PullPushAsync", "ArcticSh
 
     def epoch_to_iso(epoch: str | int) -> str:
         if isinstance(epoch, int):
-            return datetime.fromtimestamp(epoch).isoformat()
+            return datetime.fromtimestamp(epoch, tz=tz).replace(tzinfo=None).isoformat()
         else:
             return epoch
 
@@ -184,9 +187,30 @@ async def make_request_time_pagination(service: Union["PullPushAsync", "ArcticSh
     temp_save(res)
     final_res = list() + res
 
-    # at least for PullPush the newest result is returned first
-    # due to this, the `after` parameter acts as an anchor point
-    # and the `before` param reverses along headed to the `after`
+    """
+    For PullPush the latest `created_utc` result is returned first
+    due to this, the `after` parameter acts as an anchor point
+    and the `before` param reverses along headed to the `after`
+    example: ← read from right to left as list by system
+        [xxxxxxxxxxxxxxxxxxxxxx]
+         ↑ after              ↑ before
+        [xxxxxxxxxxxxxxxxxxxooo]
+         ↑ after            ↑ before
+        [xxxxxxxxxxxxxxxxoooooo]
+         ↑ after         ↑ before
+        ...
+    
+    BUT for ArcticShift, oldest/earliest comes first.
+    so `after` needs to be adjusted every time.
+    example:
+        [xxxxxxxxxxxxxxxxxxxxxx]
+         ↑ after              ↑ before
+        [oooxxxxxxxxxxxxxxxxxxx]
+            ↑ after           ↑ before
+        [ooooooxxxxxxxxxxxxxxxx]
+               ↑ after        ↑ before
+        ...
+    """
     while len(res) > 0 and params['after'] < params['before']:
         params['before'] = int(res[-1]['created_utc']) - 1
         params['after'], params['before'] = epoch_to_iso(params['after']), epoch_to_iso(params['before'])
@@ -203,7 +227,7 @@ async def make_request_time_pagination(service: Union["PullPushAsync", "ArcticSh
 # ======== supporting utility functions ========
 
 
-async def _request_sleep(service: Union["PullPushAsync", "ArcticShiftAsync"],
+async def _request_sleep(service: 'AsyncServices',
                          sleep_sec: float = None) -> None:
     # in case of manual override
     sleep_sec = service.sleep_sec if sleep_sec is None else sleep_sec
@@ -237,15 +261,18 @@ async def _request_sleep(service: Union["PullPushAsync", "ArcticShiftAsync"],
                 time.sleep(s)
                 await _request_sleep(service, sleep_sec)
 
+        case 'header-auto':
+            pass
+
         case 'manual':
             await asyncio.sleep(sleep_sec)
             return
 
         case _:
-            raise Exception(f'Wrong variable for `mode`!')
+            raise Exception(f'Wrong value for `pace_mode`!')
 
 
-def preprocess_json(service: Union["PullPushAsync", "ArcticShiftAsync"],
+def preprocess_json(service: 'AsyncServices',
                     obj: List[dict],
                     index: str = 'id') -> dict:
     """
@@ -257,6 +284,11 @@ def preprocess_json(service: Union["PullPushAsync", "ArcticShiftAsync"],
 
     indexed = dict()
     for elem in obj:
+        # for ArcticShift's /api/comments/tree endpoint, there is another layer of 'data'
+        # the dict encapsulated in 'data' needs to be removed.
+        if index not in elem:
+            elem = elem['data']
+
         elem_id = elem[index]
         if elem_id not in indexed:  # new entry
             indexed[elem_id] = elem
@@ -335,6 +367,9 @@ def _is_deleted(obj: dict) -> bool:
      - be under 100 chars
      - contain deleted or removed text marker
         Examples: '[Deleted By User]' '[removed]' '[Removed by Reddit]'
+
+    TODO: ArcticShift has a field called `_meta` containing info about edits (and maybe deletion?)
+        might have to look into that.
     """
     # parameter for debug/testing
     debug_delete = obj.get('deleted')
@@ -389,7 +424,7 @@ def split_range(iso_low: str, iso_high: str, n: int) -> List[list]:
 
 
 
-def save_json(service: Union["PullPushAsync", "ArcticShiftAsync"],
+def save_json(service: 'AsyncServices',
               file_name: str,
               data: dict) -> None:
     service.logger.info('Saving result...')

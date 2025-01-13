@@ -31,6 +31,12 @@ def to_epoch(s:str) -> int:
 class Params:
 
     @dataclass
+    class Base:
+        def setup(self):
+            raise NotImplementedError
+
+
+    @dataclass
     class PullPush:
         # constants settings
         # rate limit metrics as of feb 9th 2023
@@ -95,21 +101,38 @@ class Params:
 
     @dataclass
     class ArcticShift:
+        """
+        note that the structure of 'comments_tree_search' is different from usual.
+        encapsulated once more:
+        {"data":
+            [
+                {
+                "kind":"t1",
+                "data": {...}
+                },
+                ...
+            ]
+        }
+        """
+
         # constants settings
-        # rate limit metrics as of Jul 20th 2024
         # `X-RateLimit-Remaining` header needs to be checked!
         # POOL related parameters are not used here
-        MAX_POOL_SOFT = 0
-        MAX_POOL_HARD = 0
-        REFILL_SECOND = 0
+        # MAX_POOL_SOFT = 0
+        # MAX_POOL_HARD = 0
+        # REFILL_SECOND = 0
+        # TODO: the values are placeholders for testing, remove or modify later!
+        MAX_POOL_SOFT = 15
+        MAX_POOL_HARD = 30
+        REFILL_SECOND = 60
 
         _BASE = 'https://arctic-shift.photon-reddit.com'
         DIAGNOSTIC = 'https://status.arctic-shift.photon-reddit.com'
 
         # ================================================================
 
-        _SUBMISSION_BASE = urljoin(_BASE, 'api/posts')
-        _COMMENT_BASE = urljoin(_BASE, 'api/comments')
+        _SUBMISSION_BASE = urljoin(_BASE, 'api/posts/')
+        _COMMENT_BASE = urljoin(_BASE, 'api/comments/')
 
         SUBMISSION_SEARCH = urljoin(_SUBMISSION_BASE, 'search')
         SUBMISSION_ID = urljoin(_SUBMISSION_BASE, 'ids')
@@ -122,8 +145,8 @@ class Params:
 
         # ================================================================
 
-        _SUBREDDIT_BASE = urljoin(_BASE, 'api/subreddits')
-        _USER_BASE = urljoin(_BASE, 'api/users')
+        _SUBREDDIT_BASE = urljoin(_BASE, 'api/subreddits/')
+        _USER_BASE = urljoin(_BASE, 'api/users/')
 
         SUBREDDIT_ID = urljoin(_SUBREDDIT_BASE, 'ids')
         SUBREDDIT_SEARCH = urljoin(_SUBREDDIT_BASE, 'search')
@@ -132,7 +155,7 @@ class Params:
         USER_SEARCH = urljoin(_USER_BASE, 'search')
         USER_AGG_FLAIRS = urljoin(_USER_BASE, 'aggregate_flairs')
 
-        _USER_INTERACTIONS = urljoin(_USER_BASE, 'interactions')  # sub-base, cannot be used standalone
+        _USER_INTERACTIONS = urljoin(_USER_BASE, 'interactions/')  # sub-base, cannot be used standalone
         USER_INTERACTIONS_USR = urljoin(_USER_INTERACTIONS, 'users')
         USER_INTERACTIONS_USR_LIST = urljoin(USER_INTERACTIONS_USR, 'list')
         USER_INTERACTIONS_SUBREDDIT = urljoin(_USER_INTERACTIONS, 'subreddits')
@@ -218,7 +241,7 @@ class Params:
         }
 
         # regular search for submissions, comments
-        _search_common_params = {
+        _common_search_params = {
             'author': define_param(str),
             'subreddit': define_param(str),
             'author_flair_text': define_param(str),
@@ -231,7 +254,7 @@ class Params:
         }
 
         submission_search_params = {
-            **_search_common_params,
+            **_common_search_params,
             'crosspost_parent_id': define_param(str),
             'over_18': define_param(bool),
             'spoiler': define_param(bool),
@@ -246,7 +269,7 @@ class Params:
         }
 
         comment_search_params = {
-            **_search_common_params,
+            **_common_search_params,
             # TODO: may not be supported for very active users -> give warning prompt when used
             'body': define_param(str, reliance=lambda params: any([needed in params
                                                                    for needed in
@@ -274,7 +297,8 @@ class Params:
         }
 
         # aggregation (group by) for comment and submissions
-        agg_params = {
+        # (note: All filtering related parameters from the search endpoints are supported.)
+        _common_agg_params = {
             'aggregate': define_param(str, lambda x: x in ('created_utc', 'author', 'subreddit'), True),
             'frequency': define_param(str, required=False,
                                       reliance=lambda params: params['aggregate'] == 'created_utc'),
@@ -284,7 +308,11 @@ class Params:
             'sort': define_param(str, lambda x: x in ('asc', 'desc')),
         }
 
-        subreddits_params = {
+        submission_agg_params = _common_agg_params | submission_search_params
+
+        comment_agg_params = _common_agg_params | comment_search_params
+
+        subreddit_params = {
             'subreddit': define_param(str),
             'subreddit_prefix': define_param(str),
             'after': define_param(str, is_iso8601),
@@ -298,7 +326,7 @@ class Params:
         }
 
         # user related params (regular search, interactions and flairs
-        users_params = {
+        user_params = {
             'author': define_param(str),
             'author_prefix': define_param(str),
             'min_num_posts': define_param(int, lambda x: x >= 0),
@@ -312,7 +340,7 @@ class Params:
 
         # works for both `/api/users/interactions/users` and `/api/users/interactions/users/list`
         # `/list` lists all the individual interactions rather than aggregating them
-        users_interactions_users_params = {
+        user_interactions_users_params = {
             'author': define_param(str, required=True),
             'subreddit': define_param(str),
             'after': define_param(str, is_iso8601),
@@ -321,7 +349,7 @@ class Params:
             'limit': define_param(int, lambda x: x >= 1),
         }
 
-        users_interactions_subreddits_params = {
+        user_interactions_subreddits_params = {
             'author': define_param(str, required=True),
             'weight_posts': define_param(float, lambda x: x >= 0),
             'weight_comments': define_param(float, lambda x: x >= 0),
@@ -357,25 +385,25 @@ class Params:
                 case 'comments_tree_search':
                     return self.comment_tree_params, self.COMMENT_TREE
                 case 'subreddits_search':
-                    return self.subreddits_params, self.SUBREDDIT_SEARCH
+                    return self.subreddit_params, self.SUBREDDIT_SEARCH
                 case 'users_search':
-                    return self.users_params, self.USER_SEARCH
+                    return self.user_params, self.USER_SEARCH
 
                 # aggregations
                 case 'submissions_aggregation':
-                    return self.agg_params, self.SUBMISSION_AGG
+                    return self.submission_agg_params, self.SUBMISSION_AGG
                 case 'comments_aggregation':
-                    return self.agg_params, self.COMMENT_AGG
+                    return self.comment_agg_params, self.COMMENT_AGG
                 case 'user_flairs_aggregation':
                     return self.users_agg_flairs_params, self.USER_AGG_FLAIRS
 
                 # interactions
                 case 'user_interactions':
-                    return self.users_interactions_users_params, self.USER_INTERACTIONS_USR
+                    return self.user_interactions_users_params, self.USER_INTERACTIONS_USR
                 case 'list_users_interactions':
-                    return self.users_interactions_users_params, self.USER_INTERACTIONS_USR_LIST
+                    return self.user_interactions_users_params, self.USER_INTERACTIONS_USR_LIST
                 case 'subreddits_interactions':
-                    return self.users_interactions_subreddits_params, self.USER_INTERACTIONS_USR_LIST
+                    return self.user_interactions_subreddits_params, self.USER_INTERACTIONS_USR_LIST
 
                 case _:
                     raise Exception('wrong `mode` param for `param_processor`')

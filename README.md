@@ -45,9 +45,10 @@ pip install BAScraper
 Python 3.11+ is **needed** (`asyncio.TaskGroup` is used)
 
 **Example usage**
+
 ```python
 from datetime import datetime, timedelta
-from BAScraper.BAScraper_async import PullPushAsync
+from BAScraper_old.BAScraper_async_old import PullPushAsync
 import asyncio
 
 # `log_stream_level` can be one of DEBUG, INFO, WARNING, ERROR
@@ -56,23 +57,23 @@ ppa = PullPushAsync(log_stream_level="INFO")
 # basic fetching
 result1 = asyncio.run(ppa.get_submissions(subreddit='bluearchive',
                                           after=datetime.timestamp(
-                                              datetime(2024, 7, 1)),
+                                            datetime(2024, 7, 1)),
                                           before=datetime.timestamp(
-                                             datetime(2024, 7, 8)),
+                                            datetime(2024, 7, 8)),
                                           file_name='result1'
                                           ))
 
 # basic fetching with comments
 result2 = asyncio.run(ppa.get_submissions(subreddit='bluearchive',
                                           after=datetime.timestamp(
-                                              datetime.now() - timedelta(hours=6)),
+                                            datetime.now() - timedelta(hours=6)),
                                           file_name='result2', get_comments=True
                                           ))
 
 # basic comment fetching
 result3 = asyncio.run(ppa.get_comments(subreddit='bluearchive',
                                        after=datetime.timestamp(
-                                           datetime.now() - timedelta(hours=6)),
+                                         datetime.now() - timedelta(hours=6)),
                                        file_name='result3'
                                        ))
 

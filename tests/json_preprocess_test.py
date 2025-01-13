@@ -1,5 +1,5 @@
 import unittest
-from BAScraper import utils, BAScraper_async
+from BAScraper import utils
 import pickle
 
 
