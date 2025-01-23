@@ -41,7 +41,7 @@ class BaseAsync:
         self.comment_task_num = comment_task_num if comment_task_num is not None else task_num
 
         self.SERVICE = Params.Base()
-        self.PACE_MODES = ['auto-soft', 'auto-hard', 'header-auto', 'manual']
+        self.PACE_MODES = ['auto-soft', 'auto-hard', 'auto-header', 'manual']
 
         assert duplicate_action in ['keep_newest', 'keep_oldest', 'remove', 'keep_original', 'keep_removed'], \
             ("`duplicate_action` should be one of "
@@ -235,11 +235,12 @@ class PullPushAsync(BaseAsync):
         return is_single_request
 
 class ArcticShiftAsync(BaseAsync):
-    def __init__(self, pace_mode: str = 'auto-hard', **kwargs):  # TODO: `pace_mode` should be 'header-auto' when implemented!
+    def __init__(self, pace_mode: str = 'auto-header', **kwargs):
         super().__init__(**kwargs)
         self.SERVICE = Params.ArcticShift()
         assert pace_mode in self.PACE_MODES
         self.pace_mode = pace_mode
+
         # TODO: the values are placeholders for testing, remove or modify later!
         self.max_pool = self.SERVICE.MAX_POOL_SOFT if pace_mode == 'auto-soft' else self.SERVICE.MAX_POOL_HARD
         self.pool_amount = self.max_pool

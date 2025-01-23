@@ -88,7 +88,7 @@ async def make_request(service: 'AsyncServices',
     coro_name = asyncio.current_task().get_name()
 
     uri = param_processor(service.SERVICE, mode, **params)
-    service.logger.debug(f'uri: {uri}')
+    service.logger.debug(f'{coro_name} | uri: {uri}')
 
     retries = 0
     while retries < service.max_retries:
@@ -98,6 +98,7 @@ async def make_request(service: 'AsyncServices',
             async with aiohttp.ClientSession() as session:
                 async with session.get(uri, timeout=service.timeout) as response:
                     toc = perf_counter()
+                    headers = response.headers
                     result = await response.json()
 
                     try:
@@ -111,7 +112,7 @@ async def make_request(service: 'AsyncServices',
                     if response.ok:
                         service.logger.info(
                             f"{coro_name} | pool: {service.pool_amount} | len: {len(result)} | time: {toc - tic:.2f}")
-                        await _request_sleep(service)
+                        await _request_sleep(service, headers=headers)
                         return result
                     else:
                         # in case it doesn't raise an exception but still has errors, (cloudflare errors)
@@ -120,33 +121,33 @@ async def make_request(service: 'AsyncServices',
                         service.logger.error(f"{coro_name} | {response.status}"
                                              f"\n{response_text}\n")
                         retries += 1
-                        await _request_sleep(service, service.backoff_sec * retries)  # backoff
+                        await _request_sleep(service, service.backoff_sec * retries, headers)  # backoff
                         continue
 
         except asyncio.TimeoutError as err:
             retries += 1
             service.logger.warning(
                 f"{coro_name} | TimeoutError: Retrying... Attempt {retries}/{service.max_retries}")
-            await _request_sleep(service, service.backoff_sec * retries)  # backoff
+            await _request_sleep(service, service.backoff_sec * retries, headers)  # backoff
 
         except (aiohttp.ClientConnectorError, aiohttp.ClientConnectionError) as err:
             retries += 1
             service.logger.warning(
                 f"{coro_name} | ClientConnectionError: Retrying... Attempt {retries}/{service.max_retries}")
-            await _request_sleep(service, service.backoff_sec * retries)  # backoff
+            await _request_sleep(service, service.backoff_sec * retries, headers)  # backoff
 
         except (json.decoder.JSONDecodeError, aiohttp.client_exceptions.ContentTypeError) as err:
             retries += 1
             service.logger.warning(
                 f"{err}\n{coro_name} | JSON Decode Error: Possible malformed response. Retrying... "
                 f"Attempt {retries}/{service.max_retries}")
-            await _request_sleep(service, service.backoff_sec * retries)  # backoff
+            await _request_sleep(service, service.backoff_sec * retries, headers)  # backoff
 
         except Exception as err:
             retries += 1
             service.logger.warning(f'{coro_name} | Unexpected error: \n{err} Retrying... '
                                    f"Attempt {retries}/{service.max_retries}")
-            await _request_sleep(service, service.backoff_sec * retries)  # backoff
+            await _request_sleep(service, service.backoff_sec * retries, headers)  # backoff
 
     service.logger.error(f'{coro_name} | failed request attempt. skipping...')
     return list()
@@ -188,27 +189,17 @@ async def make_request_time_pagination(service: 'AsyncServices',
     final_res = list() + res
 
     """
-    For PullPush the latest `created_utc` result is returned first
+    For PullPush, the latest `created_utc` result is returned first
     due to this, the `after` parameter acts as an anchor point
     and the `before` param reverses along headed to the `after`
-    example: ← read from right to left as list by system
+    example: 
+    ← read from right to left as list by system
         [xxxxxxxxxxxxxxxxxxxxxx]
          ↑ after              ↑ before
         [xxxxxxxxxxxxxxxxxxxooo]
          ↑ after            ↑ before
         [xxxxxxxxxxxxxxxxoooooo]
          ↑ after         ↑ before
-        ...
-    
-    BUT for ArcticShift, oldest/earliest comes first.
-    so `after` needs to be adjusted every time.
-    example:
-        [xxxxxxxxxxxxxxxxxxxxxx]
-         ↑ after              ↑ before
-        [oooxxxxxxxxxxxxxxxxxxx]
-            ↑ after           ↑ before
-        [ooooooxxxxxxxxxxxxxxxx]
-               ↑ after        ↑ before
         ...
     """
     while len(res) > 0 and params['after'] < params['before']:
@@ -228,7 +219,8 @@ async def make_request_time_pagination(service: 'AsyncServices',
 
 
 async def _request_sleep(service: 'AsyncServices',
-                         sleep_sec: float = None) -> None:
+                         sleep_sec: float = None,
+                         headers = None) -> None:
     # in case of manual override
     sleep_sec = service.sleep_sec if sleep_sec is None else sleep_sec
 
@@ -238,9 +230,10 @@ async def _request_sleep(service: 'AsyncServices',
         service.logger.info(f'pool refilled!')
 
     match service.pace_mode:
-        case 'auto-hard' | 'auto-soft':  # no difference in throttling for now
-            if time.time() - service.last_refilled > service.SERVICE.REFILL_SECOND:
+        case 'auto-hard' | 'auto-soft':  # no difference in throttling method for now
 
+            # if pool refill is possible, refilling job
+            if time.time() - service.last_refilled > service.SERVICE.REFILL_SECOND:
                 match service.pace_mode:
                     case 'auto-hard':
                         service.pool_amount = service.SERVICE.MAX_POOL_HARD
@@ -251,18 +244,37 @@ async def _request_sleep(service: 'AsyncServices',
                 service.last_refilled = time.time()
                 service.logger.info(f'pool refilled!')
 
+            # normal operation
             if service.pool_amount > 0:
                 service.pool_amount -= 1
                 await asyncio.sleep(sleep_sec)
                 return
-            else:  # empty pool
+            # empty pool
+            else:
                 s = service.SERVICE.REFILL_SECOND - (time.time() - service.last_refilled)
-                service.logger.info(f'hard limit reached! throttling for {round(s)} seconds...')
+                service.logger.info(f'limit reached! throttling for {round(s)} seconds...')
                 time.sleep(s)
-                await _request_sleep(service, sleep_sec)
+                await _request_sleep(service, sleep_sec, headers)
 
-        case 'header-auto':
-            pass
+        case 'auto-header':
+            # checks if the response has a header
+            if headers and \
+                    (rl_remaining := headers.get('x-ratelimit-remaining')) and \
+                    (rl_reset := headers.get('x-ratelimit-reset')):
+                rl_remaining = int(rl_remaining)
+                rl_reset = int(rl_reset)
+
+                service.logger.debug(f'until pool refill: {rl_reset}s')
+                service.pool_amount = rl_remaining
+
+                # if pool empty, wait for rl_reset + 1 seconds
+                if rl_remaining <= 1:
+                    service.logger.info(f'limit reached! throttling for {rl_reset + 1} seconds...')
+                    time.sleep(rl_reset + 1)
+                    await _request_sleep(service, sleep_sec, headers)
+
+            else:
+                raise Exception('`auto-header` is used but ratelimit related header does not exist.')
 
         case 'manual':
             await asyncio.sleep(sleep_sec)
