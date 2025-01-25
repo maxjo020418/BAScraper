@@ -3,6 +3,7 @@ import logging
 import os
 from tempfile import TemporaryDirectory
 from typing import Union, Callable, Optional
+from functools import wraps
 
 from BAScraper.utils import *
 from .services import Params
@@ -17,7 +18,7 @@ from .services import Params
 #  since it might return empty results in certain segments and would end the search early.
 #  need to work/workaround on a fix regarding that.
 
-def iso_to_epoch(iso):
+def iso_to_epoch(iso: str) -> int:
     return datetime.fromisoformat(iso).timestamp()
 
 class BaseAsync:
@@ -31,7 +32,7 @@ class BaseAsync:
                  comment_task_num=None,
                  log_stream_level: str = 'INFO',
                  log_level: str = 'DEBUG',
-                 duplicate_action: str = 'keep_newest'):
+                 duplicate_action: str = 'keep_newest') -> None:
         self.sleep_sec = sleep_sec
         self.backoff_sec = backoff_sec
         self.max_retries = max_retries
@@ -133,7 +134,7 @@ class BaseAsync:
         raise NotImplementedError("BaseAsync must implement the `_validate_and_set_params` method.")
 
     async def _fetch_comments(self, result, mode,
-                              extra_preprocess: Callable[[dict], dict] = None):
+                              extra_preprocess: Callable[[dict], dict] = None) -> dict:
         self.logger.info(f'=== Fetching comments under submissions ===')
         submission_ids = asyncio.Queue()
         for submission_id in result.keys():  # enqueue all the submission ids
@@ -155,39 +156,37 @@ class BaseAsync:
 
         return result
 
-    async def _taskgroup_err_catch_block(self, mode: str, exec_block: Callable, **exec_block_kwargs):
-        self.create_temp_dir(mode)
-        exception_occurred = False
-        try:
-            result = await exec_block(**exec_block_kwargs)  # Execute the passed function
-            return result
+    def catch_taskgroup_err(self, mode: str) -> Callable:
+        def decorator(func: Callable) -> Callable:
+            @wraps(func)
+            async def wrapper(*args, **kwargs) -> Callable:
+                self.temp_dir = TemporaryDirectory(prefix=f'BAScraper-{mode}-temp_', dir=self.save_dir, delete=False)
+                self.logger.debug(f'Temp directory created: {self.temp_dir.name}')
+                try:
+                    result = await func(*args, **kwargs)  # func execution here
 
-        except* (asyncio.exceptions.CancelledError, asyncio.CancelledError) as err:
-            self.logger.error(f'Task has been cancelled! : {err.exceptions}')
-            exception_occurred = True
+                except* (asyncio.exceptions.CancelledError, asyncio.CancelledError) as err:
+                    self.logger.error(f'Task has been cancelled!: {err.exceptions}')
 
-        except* (KeyboardInterrupt, SystemExit) as err:
-            self.logger.error(f'terminated by user or system! : {err.exceptions}')
-            exception_occurred = True
+                except* (KeyboardInterrupt, SystemExit) as err:
+                    self.logger.error(f'terminated by user or system!: {err.exceptions}')
 
-        except* Exception as err:
-            self.logger.error(f"Error during fetch: {err}")
-            for sub_err in err.exceptions:
-                self.logger.error(f"Sub-exception: {sub_err}")
-                raise sub_err
-            exception_occurred = True
+                except* Exception as err:
+                    self.logger.error(f"Unexpected error during fetch: {err}")
+                    for sub_err in err.exceptions:
+                        self.logger.error(f"Sub-exception: {sub_err}")
+                        raise sub_err
 
-        finally:
-            if not exception_occurred:
-                self.cleanup_temp_dir()
+                else:
+                    if self.temp_dir:
+                        self.temp_dir.cleanup()
+                    return result
 
-    def create_temp_dir(self, mode):
-        self.temp_dir = TemporaryDirectory(prefix=f'BAScraper-{mode}-temp_', dir=self.save_dir, delete=False)
-        self.logger.debug(f'Temp directory created: {self.temp_dir.name}')
+                finally:
+                    pass
 
-    def cleanup_temp_dir(self):
-        if self.temp_dir:
-            self.temp_dir.cleanup()
+            return wrapper
+        return decorator
 
 
 class PullPushAsync(BaseAsync):
@@ -200,6 +199,7 @@ class PullPushAsync(BaseAsync):
         self.pool_amount = self.max_pool
 
     async def fetch(self, mode: str, get_comments=False, file_name=None, **params):
+        @self.catch_taskgroup_err(mode)
         async def _fetch():
             is_single_request = self._validate_and_set_params(params, mode)
             if is_single_request:
@@ -216,7 +216,7 @@ class PullPushAsync(BaseAsync):
 
             return result
 
-        return await self._taskgroup_err_catch_block(mode, _fetch)
+        return await _fetch()
 
 
     def _validate_and_set_params(self, params: dict, mode: str):
@@ -241,11 +241,12 @@ class ArcticShiftAsync(BaseAsync):
         assert pace_mode in self.PACE_MODES
         self.pace_mode = pace_mode
 
-        # TODO: the values are placeholders for testing, remove or modify later!
+        # only for placeholder, pool_amount would be from header response
         self.max_pool = self.SERVICE.MAX_POOL_SOFT if pace_mode == 'auto-soft' else self.SERVICE.MAX_POOL_HARD
         self.pool_amount = self.max_pool
 
     async def fetch(self, mode: str, get_comments=False, file_name=None, **params):
+        @self.catch_taskgroup_err(mode)
         async def _fetch():
             is_single_request = self._validate_and_set_params(params, mode)
             if is_single_request:
@@ -262,7 +263,7 @@ class ArcticShiftAsync(BaseAsync):
 
             return result
 
-        return await self._taskgroup_err_catch_block(mode, _fetch)
+        return await _fetch()
 
     def _validate_and_set_params(self, params: dict, mode: str):
         is_single_request = False

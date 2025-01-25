@@ -42,8 +42,6 @@ def param_processor(service: 'AsyncServices',
 
 
     # assertion stuffs for all the params
-    # TODO: assertions may differ from services - multiple types may be allowed in arctic shift, also, required params!
-    #   special fields(assertions required) for arctic include: limit, body,
 
     # going to remove elems if required param exists
     # if required_params is not empty in the end -> required params are not used, error

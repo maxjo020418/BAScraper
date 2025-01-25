@@ -4,7 +4,11 @@ from urllib.parse import urljoin
 from datetime import datetime
 
 
-def define_param(param_type, assertion=None, required=False, modifications=None, reliance=None):
+def define_param(param_type,
+                 assertion=None,
+                 required=False,
+                 modifications=None,
+                 reliance=None) -> dict:
     return {
         'type': param_type,
         'assert': assertion,
@@ -20,7 +24,7 @@ def is_iso8601(s: str) -> bool:
     except ValueError:
         return False
 
-def to_epoch(s:str) -> int:
+def to_epoch(s: str) -> int:
     dt = datetime.fromisoformat(s)
     return int(dt.timestamp())
 
@@ -89,7 +93,7 @@ class Params:
 
         # ================================================================
 
-        def setup(self, mode) -> tuple:  # returns (scheme, base_uri_string)
+        def setup(self, mode: str) -> tuple:  # returns (scheme, base_uri_string)
             match mode:
                 case 'comments':
                     return self.comment_params, self.COMMENT
@@ -116,14 +120,10 @@ class Params:
         """
 
         # constants settings
-        # `X-RateLimit-Remaining` header needs to be checked!
-        # POOL related parameters are not used here
-        # MAX_POOL_SOFT = 0
-        # MAX_POOL_HARD = 0
-        # REFILL_SECOND = 0
-        # TODO: the values are placeholders for testing, remove or modify later!
-        MAX_POOL_SOFT = 15
-        MAX_POOL_HARD = 30
+        # `X-RateLimit-Remaining` is used for ratelimiting
+        # POOL related parameters are not used here usually - placeholder values
+        MAX_POOL_SOFT = 1000
+        MAX_POOL_HARD = 1000
         REFILL_SECOND = 60
 
         _BASE = 'https://arctic-shift.photon-reddit.com'
@@ -270,7 +270,7 @@ class Params:
 
         comment_search_params = {
             **_common_search_params,
-            # TODO: may not be supported for very active users -> give warning prompt when used
+            # may not be supported for very active users -> give warning prompt when used
             'body': define_param(str, reliance=lambda params: any([needed in params
                                                                    for needed in
                                                                    ('author', 'subreddit', 'link_id', 'parent_id')])),
@@ -365,7 +365,7 @@ class Params:
 
         # ================================================================
 
-        def setup(self, mode) -> tuple:  # returns (scheme, base_uri_string)
+        def setup(self, mode: str) -> tuple:  # returns (scheme, base_uri_string)
             match mode:
                 # id lookup
                 case 'submissions_id_lookup':
