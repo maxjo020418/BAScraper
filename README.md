@@ -26,14 +26,15 @@
 > The old docs are in `./BAScraper_old/README_old.md`.
 > 
 > This new v0.2.x-a is only tested to the extent that I personally use, so full coverage testing has not been done.
+> It also hasn't been published to PyPi (PyPi on v0.1.2), manually download for the newest v0.2-a
 > please report unexpected issues that may occur.
+
+An API wrapper for PullPush.io and Arctic-Shift - the 3rd party replacement APIs for Reddit. Nothing special.
 
 After the [2023 Reddit API controversy](https://en.wikipedia.org/wiki/2023_Reddit_API_controversy), 
 PushShift.io(and also wrappers such as PSAW and PMAW) is now only available to reddit admins and Reddit PRAW is 
 honestly useless when trying to get a lots of data and data from a specific timeframe.
 This aims to help with that since these 3rd party services didn't have any official/unofficial python wrappers.
-
-An API wrapper for PullPush.io and Arctic-Shift - the 3rd party replacement APIs for Reddit. Nothing special.
 
 ### Features
 - Asynchronous operations for better performance. (updated from the old multithreaded approach)
@@ -46,6 +47,10 @@ Also, please respect cool-down times and refrain from requesting very large amou
 It stresses the server and can cause inconvenience for everyone.
 
 For large amounts of data, head to [ArcticShift's academic torrent zst dumps](https://github.com/ArthurHeitmann/arctic_shift)
+
+**Links to the services:**
+- [PullPush.io](https://pullpush.io/)
+- [Arctic-Shift](https://arctic-shift.photon-reddit.com/)
 
 ## Installation and basic usage
 you can install the package via pip
@@ -142,6 +147,9 @@ if __name__ == '__main__':
 > Consider waiting a few minutes or seconds before running scripts if needed.
 
 ## Parameters
+For more info on each of the parameters as well as additional info (TOS, extra tools, etc) visit the following links:
+- [PullPush.io](https://pullpush.io/)
+- [Arctic-Shift](https://arctic-shift.photon-reddit.com/)
 ### Initialization Parameters
 **for `PullPushAsync.__init__` & `ArcticShiftAsync.__init__`**
 
