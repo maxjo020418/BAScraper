@@ -2,19 +2,19 @@
 ## `Pushpull.__init__`
 all parameters are optional
 
-| parameter   | type          | description                                                                                        | default value                     |
-|-------------|---------------|----------------------------------------------------------------------------------------------------|-----------------------------------|
-| creds       | `List[Creds]` | not implemented yet                                                                                |                                   |
-| sleepsec    | `int`         | cooldown time between each request                                                                 | 1                                 |
-| backoffsec  | `int`         | backoff time for each failed request                                                               | 3                                 |
-| max_retries | `int`         | number of retries for failed requests before it gives up                                           | 5                                 |
-| timeout     | `int`         | time until it's considered as timout err                                                           | 10                                |
-| threads     | `int`         | no. of threads when multithreading is used                                                         | 2                                 |
-| comment_t   | `int`         | no. of threads used for comment fetching, defaults to `threads`                                    |                                   |
-| batch_size  | `int`         | not implemented yet                                                                                |                                   |
-| log_level   | `str`         | log level in which is displayed on the console, should be a string representation of logging level | `INFO`                            |
-| cwd         | `str`         | dir path where all the log files and JSON file will be stored                                      | `os.getcwd()` (current directory) |
-| pace_mode   | `str`         | one of `auto-soft`, `auto-hard`, `manual`. sets the pace to mitigate rate-limiting. (mostly meaningless) | `auto-hard`                 |
+| parameter   | type          | description                                                                                              | default value                     |
+|-------------|---------------|----------------------------------------------------------------------------------------------------------|-----------------------------------|
+| creds       | `List[Creds]` | not implemented yet                                                                                      |                                   |
+| sleepsec    | `int`         | cooldown time between each request                                                                       | 1                                 |
+| backoffsec  | `int`         | backoff time for each failed request                                                                     | 3                                 |
+| max_retries | `int`         | number of retries for failed requests before it gives up                                                 | 5                                 |
+| timeout     | `int`         | time until it's considered as timout err                                                                 | 10                                |
+| threads     | `int`         | no. of threads when multithreading is used                                                               | 2                                 |
+| comment_t   | `int`         | no. of threads used for comment fetching, defaults to `threads`                                          |                                   |
+| batch_size  | `int`         | not implemented yet                                                                                      |                                   |
+| log_level   | `str`         | log level in which is displayed on the console, should be a string representation of logging level       | `INFO`                            |
+| cwd         | `str`         | dir path where all the log files and JSON file will be stored                                            | `os.getcwd()` (current directory) |
+| pace_mode   | `str`         | one of `auto-soft`, `auto-hard`, `manual`. sets the pace to mitigate rate-limiting. (mostly meaningless) | `auto-hard`                       |
 
 ## `Pushpull.get_submissions` & `Pushpull.get_comments`
 all parameters are optional

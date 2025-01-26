@@ -126,26 +126,26 @@ async def make_request(service: 'AsyncServices',
             retries += 1
             service.logger.warning(
                 f"{coro_name} | TimeoutError: Retrying... Attempt {retries}/{service.max_retries}")
-            await _request_sleep(service, service.backoff_sec * retries, headers)  # backoff
+            await _request_sleep(service, service.backoff_sec * retries)  # backoff
 
         except (aiohttp.ClientConnectorError, aiohttp.ClientConnectionError) as err:
             retries += 1
             service.logger.warning(
                 f"{coro_name} | ClientConnectionError: Retrying... Attempt {retries}/{service.max_retries}")
-            await _request_sleep(service, service.backoff_sec * retries, headers)  # backoff
+            await _request_sleep(service, service.backoff_sec * retries)  # backoff
 
         except (json.decoder.JSONDecodeError, aiohttp.client_exceptions.ContentTypeError) as err:
             retries += 1
             service.logger.warning(
                 f"{err}\n{coro_name} | JSON Decode Error: Possible malformed response. Retrying... "
                 f"Attempt {retries}/{service.max_retries}")
-            await _request_sleep(service, service.backoff_sec * retries, headers)  # backoff
+            await _request_sleep(service, service.backoff_sec * retries)  # backoff
 
         except Exception as err:
             retries += 1
             service.logger.warning(f'{coro_name} | Unexpected error: \n{err} Retrying... '
                                    f"Attempt {retries}/{service.max_retries}")
-            await _request_sleep(service, service.backoff_sec * retries, headers)  # backoff
+            await _request_sleep(service, service.backoff_sec * retries)  # backoff
 
     service.logger.error(f'{coro_name} | failed request attempt. skipping...')
     return list()

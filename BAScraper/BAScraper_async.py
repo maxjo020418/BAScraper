@@ -179,6 +179,7 @@ class BaseAsync:
 
                 else:
                     if self.temp_dir:
+                        self.logger.debug('cleaning up temp dir...')
                         self.temp_dir.cleanup()
                     return result
 

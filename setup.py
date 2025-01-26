@@ -1,11 +1,12 @@
-# run `python3 -m build` to build
-# `twine check dist/*` to verify
-# `twine upload dist/*` to upload
-# check https://blog.ganssle.io/articles/2021/10/setup-py-deprecated.html#summary for details
-
+"""
+1. run `python3 -m build` to build
+2. `twine check dist/*` to verify
+3. `twine upload dist/*` to upload
+check https://blog.ganssle.io/articles/2021/10/setup-py-deprecated.html#summary for details
+"""
 from setuptools import setup, find_packages
 
-VERSION = '0.1.2'
+VERSION = '0.2.0'
 DESCRIPTION = 'API wrapper for PullPush.io - the 3rd party replacement API for Reddit.'
 LONG_DESCRIPTION = '''currently it can:
 - get submissions/comments from a certain subreddit in supported order/sorting methods specified in the PullPush.io API docs
@@ -30,7 +31,7 @@ setup(
     },
     keywords=['reddit', 'scraper', 'PullPush', 'wrapper'],
     classifiers=[
-        "Development Status :: 2 - Pre-Alpha",
+        "Development Status :: 3 - Alpha",
         "Programming Language :: Python :: 3.11",
         "License :: OSI Approved :: MIT License",
     ],

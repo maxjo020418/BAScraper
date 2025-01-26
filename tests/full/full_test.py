@@ -1,9 +1,8 @@
 from BAScraper.BAScraper_async import PullPushAsync, ArcticShiftAsync
 import asyncio
 
-ppa = PullPushAsync(log_stream_level="DEBUG")
-asa = ArcticShiftAsync(log_stream_level="DEBUG",
-                       task_num=10)
+ppa = PullPushAsync(log_stream_level="DEBUG", task_num=2)
+asa = ArcticShiftAsync(log_stream_level="DEBUG", task_num=10)
 
 
 async def test1():
@@ -13,7 +12,7 @@ async def test1():
         subreddit='bluearchive',
         get_comments=True,
         after='2024-07-01',
-        before='2024-07-01T12:00:00',
+        before='2024-07-01T06:00:00',
         file_name='test1'
     )
     print('test 1 len:', len(result1))
@@ -24,7 +23,7 @@ async def test1():
         subreddit='bluearchive',
         # get_comments=True,
         after='2024-07-01',
-        before='2024-07-01T12:00:00',
+        before='2024-07-01T06:00:00',
         file_name='test2'
     )
     print('test 2 len:', len(result2))
@@ -35,10 +34,11 @@ async def test2():
     result1 = await asa.fetch(
         mode='submissions_search',
         subreddit='bluearchive',
-        get_comments=True,
+        # get_comments=True,
         after='2024-07-01',
         before='2024-07-05T03:00:00',
         file_name='test1',
+        fields=['created_utc', 'title', 'url', 'id'],
         limit=0
     )
     print('test 1 len:', len(result1))
@@ -47,11 +47,12 @@ async def test2():
     result2 = await asa.fetch(
         mode='comments_search',
         subreddit='bluearchive',
-        # get_comments=True,
+        body='yuuka and noa',
         after='2024-07-01',
         before='2024-07-01T12:00:00',
         file_name='test2',
-        limit=0
+        limit=100,
+        fields=['created_utc', 'body', 'id'],
     )
     print('test 2 len:', len(result2))
 

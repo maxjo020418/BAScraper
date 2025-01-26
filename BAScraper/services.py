@@ -1,4 +1,5 @@
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urljoin
 from datetime import datetime
@@ -220,6 +221,21 @@ class Params:
             '_meta'
         ]
 
+        @staticmethod
+        def field_check(field: list) -> Callable:
+            def _field_check(x: list) -> bool:
+                if 'created_utc' in field:
+                    # check if created_utc is in field specification(if it's required)
+                    # since this field is used for auto pagination
+                    assert 'created_utc' in x, \
+                        'the `created_utc` field is needed for this operation, please include it'
+                    assert 'id' in x, \
+                        'the `id` field is needed for this operation, please include it'
+
+                return all([x for x in field])
+
+            return _field_check
+
         # ================================================================
 
         """
@@ -264,8 +280,7 @@ class Params:
             'query': define_param(str),  # search for both title and selftext
             'url': define_param(str),  # content url prefix match such as YouTube or imgur
             'url_exact': define_param(bool),  # if exact match of above url field is going to be used
-            # IDE spits shit when not specifying full path for some reason
-            'fields': define_param(list, lambda x: all([x for x in Params.ArcticShift.submission_fields])),
+            'fields': define_param(list, field_check(submission_fields)),
         }
 
         comment_search_params = {
@@ -277,8 +292,7 @@ class Params:
             # this is for comments under a submission
             'link_id': define_param(str),
             'parent_id': define_param(str),
-            # IDE spits shit when not specifying full path for some reason
-            'fields': define_param(list, lambda x: all([x for x in Params.ArcticShift.comment_fields])),
+            'fields': define_param(list, field_check(comment_fields)),
         }
 
         # get a comment tree
@@ -292,8 +306,6 @@ class Params:
             'start_breadth': define_param(int, lambda x: 0 <= x),
             'start_depth': define_param(int, lambda x: 0 <= x),
             'md2html': define_param(bool),
-            # IDE spits shit when not specifying full path for some reason
-            'fields': define_param(list, lambda x: all([x for x in Params.ArcticShift.submission_fields])),
         }
 
         # aggregation (group by) for comment and submissions
@@ -323,6 +335,7 @@ class Params:
             'limit': define_param(int, lambda x: 1 <= x <= 1000),
             'sort': define_param(str, lambda x: x in ('asc', 'desc')),
             'sort_type': define_param(str, lambda x: x in ('created_utc', 'subscribers', 'subreddit')),
+            'fields': define_param(list, field_check(subreddit_fields)),
         }
 
         # user related params (regular search, interactions and flairs
