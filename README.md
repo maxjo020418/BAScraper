@@ -399,6 +399,11 @@ As of writing it has better performance and ratelimit rates compared to PullPush
 - up to 10 ~ 20 workers(ex: `task_num=10`) still seem to hold up well 
 - response time usually around a second with complex large queries over 5 seconds
 
+### Conclusion
+While Arctic-Shift has better performance for simple queries, for complex queries, PullPush does perform better.
+Also, PullPush can do a Reddit-wide FTS(Full Text Search) but Arctic-Shift can only do FTS for a user or a certain subreddit.
+So choose the service depending on your needs.
+
 ## Returned JSON object structure
 the `fetch` function each returns a `dict` object that is indexed based on its unique reddit submission/comment/user/subreddit ID.
 It is sorted in the order you specified when scraping
