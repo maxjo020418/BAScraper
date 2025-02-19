@@ -283,87 +283,92 @@ async def _request_sleep(service: 'AsyncServices',
 
 
 def preprocess_json(service: 'AsyncServices',
-                    obj: List[dict],
+                    obj: List[dict] | dict,
                     index: str = 'id') -> dict:
     """
     :param service:
     :param obj:
+        obj is a list of dicts for regular non agg or special endpoint results
+        for aggregations or some endpoints, the obj is just a single dict
     :param index: what parameter should the indexing be based on
     :return: JSON(dict) indexed by the submission/comment ID
     """
+    if isinstance(obj, dict):
+        return obj  # just return obj when dict is returned
 
-    indexed = dict()
-    for elem in obj:
-        # for ArcticShift's /api/comments/tree endpoint, there is another layer of 'data'
-        # the dict encapsulated in 'data' needs to be removed.
-        if index not in elem:
-            elem = elem['data']
+    else:  # same as: `if isinstance(obj, list):`
+        indexed = dict()
+        for elem in obj:
+            # for ArcticShift's /api/comments/tree endpoint, there is another layer of 'data'
+            # the dict encapsulated in 'data' needs to be removed.
+            if index not in elem:
+                elem = elem['data']
 
-        elem_id = elem[index]
-        if elem_id not in indexed:  # new entry
-            indexed[elem_id] = elem
-        else:  # possible duplicate
+            elem_id = elem[index]
+            if elem_id not in indexed:  # new entry
+                indexed[elem_id] = elem
+            else:  # possible duplicate
+                match service.duplicate_action:
+                    case 'keep_newest':
+                        indexed[elem_id] = elem  # keep the last entry
+
+                    case 'keep_oldest':
+                        pass  # keep the first entry
+
+                    case 'remove':
+                        # putting a 'remove' flag for later removal
+                        indexed[elem_id] = 'remove'
+
+                    case 'keep_original':
+                        # essentially indexed_deleted is same as 'was the previous duplicate element a deleted one?'
+                        indexed_deleted = _is_deleted(indexed[elem_id]) if indexed[elem_id] != 'remove' else True
+                        curr_deleted = _is_deleted(elem)
+
+                        if indexed_deleted and curr_deleted:
+                            indexed[elem_id] = 'remove'
+                        elif indexed_deleted and not curr_deleted:
+                            indexed[elem_id] = elem
+                        elif not indexed_deleted and curr_deleted:
+                            pass
+                        else:  # both not deleted
+                            # service.logger.warning('multiple non-deleted duplicate versions exist! '
+                            #                        'preserving newest non-deleted version.')
+                            indexed[elem_id] = elem
+
+                    case 'keep_removed':
+                        # essentially indexed_deleted is same as 'was the previous duplicate element a deleted one?'
+                        indexed_deleted = _is_deleted(indexed[elem_id]) if indexed[elem_id] != 'remove' else False
+                        curr_deleted = _is_deleted(elem)
+
+                        if indexed_deleted and curr_deleted:
+                            # service.logger.warning('multiple deleted duplicate versions exist! '
+                            #                        'preserving newest deleted version.')
+                            indexed[elem_id] = elem
+                        elif indexed_deleted and not curr_deleted:
+                            pass
+                        elif not indexed_deleted and curr_deleted:
+                            indexed[elem_id] = elem
+                        else:  # both not deleted
+                            indexed[elem_id] = 'remove'
+
+                    case _:
+                        service.logger.warning('wrong `duplicate_action` reverting to default `keep_newest`')
+                        indexed[elem_id] = elem  # keep the last entry
+
+        if service.duplicate_action in ['keep_removed', 'keep_original', 'remove']:
+            original_count = len(indexed)
+            indexed = {k: v for k, v in indexed.items() if v != 'remove'}
+            del_count = original_count - len(indexed)
+
             match service.duplicate_action:
-                case 'keep_newest':
-                    indexed[elem_id] = elem  # keep the last entry
+                case 'keep_removed' | 'keep_original':
+                    service.logger.warning(f'{del_count} entry/entries have been removed due to '
+                                           f'deletion check failure.') \
+                        if del_count > 0 else None
+                case 'removed':
+                    service.logger.info(f'{del_count} dupe entries removed.')
 
-                case 'keep_oldest':
-                    pass  # keep the first entry
-
-                case 'remove':
-                    # putting a 'remove' flag for later removal
-                    indexed[elem_id] = 'remove'
-
-                case 'keep_original':
-                    # essentially indexed_deleted is same as 'was the previous duplicate element a deleted one?'
-                    indexed_deleted = _is_deleted(indexed[elem_id]) if indexed[elem_id] != 'remove' else True
-                    curr_deleted = _is_deleted(elem)
-
-                    if indexed_deleted and curr_deleted:
-                        indexed[elem_id] = 'remove'
-                    elif indexed_deleted and not curr_deleted:
-                        indexed[elem_id] = elem
-                    elif not indexed_deleted and curr_deleted:
-                        pass
-                    else:  # both not deleted
-                        # service.logger.warning('multiple non-deleted duplicate versions exist! '
-                        #                        'preserving newest non-deleted version.')
-                        indexed[elem_id] = elem
-
-                case 'keep_removed':
-                    # essentially indexed_deleted is same as 'was the previous duplicate element a deleted one?'
-                    indexed_deleted = _is_deleted(indexed[elem_id]) if indexed[elem_id] != 'remove' else False
-                    curr_deleted = _is_deleted(elem)
-
-                    if indexed_deleted and curr_deleted:
-                        # service.logger.warning('multiple deleted duplicate versions exist! '
-                        #                        'preserving newest deleted version.')
-                        indexed[elem_id] = elem
-                    elif indexed_deleted and not curr_deleted:
-                        pass
-                    elif not indexed_deleted and curr_deleted:
-                        indexed[elem_id] = elem
-                    else:  # both not deleted
-                        indexed[elem_id] = 'remove'
-
-                case _:
-                    service.logger.warning('wrong `duplicate_action` reverting to default `keep_newest`')
-                    indexed[elem_id] = elem  # keep the last entry
-
-    if service.duplicate_action in ['keep_removed', 'keep_original', 'remove']:
-        original_count = len(indexed)
-        indexed = {k: v for k, v in indexed.items() if v != 'remove'}
-        del_count = original_count - len(indexed)
-
-        match service.duplicate_action:
-            case 'keep_removed' | 'keep_original':
-                service.logger.warning(f'{del_count} entry/entries have been removed due to '
-                                       f'deletion check failure.') \
-                    if del_count > 0 else None
-            case 'removed':
-                service.logger.info(f'{del_count} dupe entries removed.')
-
-    return indexed
+        return indexed
 
 
 def _is_deleted(obj: dict) -> bool:

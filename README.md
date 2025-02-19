@@ -335,11 +335,11 @@ For more info on each of the parameters as well as additional info (TOS, extra t
 		| `parent_id` | `str`  | None                              | No       | Filters by parent comment ID.           |
 		| `fields`    | `list` | Valid field names for comments    | No       | Filters the fields included in results. |
 
-     - **User Flair**
+   - **`user_flairs_aggregation`**
 
-		| Parameter | Type  | Restrictions | Required | Notes                                                              |
-		|-----------|-------|--------------|----------|--------------------------------------------------------------------|
-		| `author`  | `str` | None         | Yes      | Specifies the user for whom to aggregate flairs across subreddits. |
+      | Parameter | Type  | Restrictions | Required | Notes                                                              |
+      |-----------|-------|--------------|----------|--------------------------------------------------------------------|
+      | `author`  | `str` | None         | Yes      | Specifies the user for whom to aggregate flairs across subreddits. |
 
 4. **Interactions**
    - **`user_interactions`, `list_users_interactions`**

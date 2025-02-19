@@ -13,10 +13,6 @@ from .services import Params
 #  (needs to share some values like timeout stuffs)
 #  also need to mention that restarting the script would reset the used up pool values,
 #  so users need to keep that in mind
-#  2. At any moment an empty result is returned, the coro will stop making requests.
-#  This is an unintended behavior(in the while loop) and might cause problems if filters are used
-#  since it might return empty results in certain segments and would end the search early.
-#  need to work/workaround on a fix regarding that.
 
 def iso_to_epoch(iso: str) -> int:
     return datetime.fromisoformat(iso).timestamp()
@@ -223,7 +219,8 @@ class PullPushAsync(BaseAsync):
     def _validate_and_set_params(self, params: dict, mode: str):
         is_single_request = False
         if 'after' in params and 'before' in params:
-            assert iso_to_epoch(params['after']) < iso_to_epoch(params['before']), '`before` needs to be bigger than `after`'
+            assert iso_to_epoch(params['after']) < iso_to_epoch(params['before']), \
+                '`before` needs to be bigger than `after`'
         elif 'after' in params and 'before' not in params:
             params['before'] = datetime.now().isoformat()
         elif 'after' not in params and 'before' in params:
@@ -270,14 +267,19 @@ class ArcticShiftAsync(BaseAsync):
         is_single_request = False
         if mode in ('submissions_search', 'comments_search', 'subreddits_search') or mode.endswith('_interactions'):
             if 'after' in params and 'before' in params:
-                assert iso_to_epoch(params['after']) < iso_to_epoch(params['before']), '`before` needs to be bigger than `after`'
+                assert iso_to_epoch(params['after']) < iso_to_epoch(params['before']), \
+                    '`before` needs to be bigger than `after`'
             elif 'after' in params and 'before' not in params:
                 params['before'] = datetime.now().isoformat()
             elif 'after' not in params and 'before' in params:
                 self.task_num = 1
                 is_single_request = True
-            else:
+            else:  # both 'after' and 'before' not in params
+                self.logger.warning("no 'after' or 'before' params found")
                 self.task_num = 1
                 is_single_request = True
+
+        else:
+            is_single_request = True
 
         return is_single_request
