@@ -1,4 +1,4 @@
-from BAScraper.BAScraper_async import PullPushAsync, ArcticShiftAsync
+from BAScraper_old.BAScraper_async import PullPushAsync, ArcticShiftAsync
 import asyncio
 
 ppa = PullPushAsync(log_stream_level="DEBUG", task_num=2)

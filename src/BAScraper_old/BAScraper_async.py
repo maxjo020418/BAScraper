@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 from typing import Union, Callable, Optional
 from functools import wraps
 
-from BAScraper.utils import *
+from BAScraper_old.utils import *
 from .services import Params
 
 # TODO: for docs =>

@@ -1,0 +1,30 @@
+[project]
+name = "BAscraper"
+version = "0.3.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "maxjo020418", email = "maxjo020418@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.1",
+    "pydantic>=2.11.10",
+    "pydantic-extra-types[pendulum]>=2.10.5",
+]
+
+[project.optional-dependencies]  # for BAscraper[old]
+old = [
+
+]
+
+[build-system]
+requires = ["uv_build>=0.8.23,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = ["BAScraper", "BAScraper_old"]
+module-root = "src"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "ASYNC"]

@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timedelta
-from BAScraper import utils
+from BAScraper_old import utils
 
 
 def datetime_to_epoch(dt):

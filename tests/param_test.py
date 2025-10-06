@@ -1,5 +1,5 @@
 import unittest
-from BAScraper import utils
+from BAScraper_old import utils
 
 
 class TestProcessParams(unittest.TestCase):
