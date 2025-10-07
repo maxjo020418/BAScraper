@@ -99,7 +99,7 @@ class PullPushModel(BaseModel):
 
     link_id: Annotated[
         StrictStr | None,
-        Group(['comment']),
+        Group('comment'),
         Field(pattern=r'^[0-9a-zA-Z]+$')  # Base36 ID rule
     ] = None
 
@@ -107,61 +107,61 @@ class PullPushModel(BaseModel):
 
     title: Annotated[
         StrictStr | None,
-        Group(['submission']),
+        Group('submission'),
         Field(min_length=1)
     ] = None
 
     selftext: Annotated[
         str | None,
-        Group(['submission']),
+        Group('submission'),
         Field(min_length=1)
     ] = None
 
     score: Annotated[
         StrictStr | StrictInt | None,
-        Group(['submission']),
+        Group('submission'),
         Field()
     ] = None
 
     num_comments: Annotated[
         StrictStr | StrictInt | None,
-        Group(['submission']),
+        Group('submission'),
         Field()
     ] = None
 
     over_18: Annotated[
         StrictBool | None,
-        Group(['submission']),
+        Group('submission'),
         Field()
     ] = None
 
     is_video: Annotated[
         StrictBool | None,
-        Group(['submission']),
+        Group('submission'),
         Field()
     ] = None
 
     locked: Annotated[
         StrictBool | None,
-        Group(['submission']),
+        Group('submission'),
         Field()
     ] = None
 
     stickied: Annotated[
         StrictBool | None,
-        Group(['submission']),
+        Group('submission'),
         Field()
     ] = None
 
     spoiler: Annotated[
         StrictBool | None,
-        Group(['submission']),
+        Group('submission'),
         Field()
     ] = None
 
     contest_mode: Annotated[
         StrictBool | None,
-        Group(['submission']),
+        Group('submission'),
         Field()
     ] = None
 
@@ -169,15 +169,14 @@ class PullPushModel(BaseModel):
     def validate_operator(cls, v):
         if isinstance(v, str):
             if not re.fullmatch(r"^(?:\d+|>=\d+|<=\d+|>\d+|<\d+)$", v):
-                raise ValueError("Score string must be a valid comparison operator")
+                raise ValueError("`score` field must be a valid comparison operator")
         return v
 
     @model_validator(mode="after")
     def check_endpoint_specific_fields(self):
-        # accessing `model_fields` via instance is depricated, only from class itself
-        print(type(self))
         fields_set: set = self.model_fields_set
         for field_set in fields_set:
+            # accessing `model_fields` via instance is depricated, only from class itself
             metadata: List[Group] = type(self).model_fields[field_set].metadata
             if len(metadata) and self.endpoint not in metadata[0].group:
                 raise ValueError(
@@ -185,10 +184,13 @@ class PullPushModel(BaseModel):
 
         return self
 
-test = PullPushModel(
-    endpoint='submission',
-    q='"test phrase"',
-    ids=['abc123', 'def456'],
-    size=50,
-    sort='desc',
-)
+
+if __name__ == "__main__":
+    test = PullPushModel(
+        endpoint='submission',
+        q='"test phrase"',
+        ids=['abc123', 'def456'],
+        size=50,
+        sort='desc',
+        score='>=10'
+    )
