@@ -1,4 +1,4 @@
-from typing import Annotated, Literal, List
+from typing import Annotated, Literal, List, Self
 from pydantic import (
     BaseModel,
     Field,
@@ -14,7 +14,7 @@ import re
 EndpointTypes = Literal['submission', 'comment']
 
 class Group:
-    def __init__(self, group: List[EndpointTypes] | EndpointTypes):
+    def __init__(self, group: List[EndpointTypes] | EndpointTypes) -> None:
         self.group: List[EndpointTypes] = group if isinstance(group, list) else [group]
 
 
@@ -84,13 +84,13 @@ class PullPushModel(BaseModel):
     ] = None
 
     after: Annotated[
-        Date | DateTime | None,
+        DateTime | int | None,
         Group(['submission', 'comment']),
         Field()
     ] = None
 
     before: Annotated[
-        Date | DateTime | None,
+        DateTime | int | None,
         Group(['submission', 'comment']),
         Field()
     ] = None
@@ -166,21 +166,35 @@ class PullPushModel(BaseModel):
     ] = None
 
     @field_validator("score", "num_comments")
-    def validate_operator(cls, v):
+    @classmethod
+    def validate_operator(cls, v) -> str:
         if isinstance(v, str):
             if not re.fullmatch(r"^(?:\d+|>=\d+|<=\d+|>\d+|<\d+)$", v):
                 raise ValueError("`score` field must be a valid comparison operator")
         return v
 
     @model_validator(mode="after")
-    def check_endpoint_specific_fields(self):
+    def check_endpoint_specific_fields(self) -> Self:
         fields_set: set = self.model_fields_set
         for field_set in fields_set:
-            # accessing `model_fields` via instance is depricated, only from class itself
+            # accessing `model_fields` via instance is deprecated,
+            # should be accessed only from class itself
             metadata: List[Group] = type(self).model_fields[field_set].metadata
             if len(metadata) and self.endpoint not in metadata[0].group:
                 raise ValueError(
                     f"Field '{field_set}' is not valid for endpoint '{self.endpoint}'")
+
+        return self
+
+    @model_validator(mode="after")
+    def check_date_order(self) -> Self:  # also convert datetime to epoch
+        if isinstance(self.after, DateTime):
+            self.after = self.after.int_timestamp
+        if isinstance(self.before, DateTime):
+            self.before = self.before.int_timestamp
+
+        if self.after and self.before and self.after >= self.before:
+            raise ValueError("'after' must be less than 'before'")
 
         return self
 
@@ -194,3 +208,4 @@ if __name__ == "__main__":
         sort='desc',
         score='>=10'
     )
+    print(test.model_dump())
