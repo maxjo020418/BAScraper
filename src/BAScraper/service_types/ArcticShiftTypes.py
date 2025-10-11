@@ -1,5 +1,14 @@
-from typing import Annotated, ClassVar, Dict, List, Literal, Optional, Self, Tuple, Union
-import re
+from typing import (
+    Annotated,
+    ClassVar,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Self,
+    Tuple,
+    Union,
+)
 
 from pydantic import (
     BaseModel,
@@ -11,7 +20,10 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
 from pydantic_extra_types.pendulum_dt import DateTime
+import re
+import warnings
 
 ArcticShiftEndpointTypes = Literal[
     "posts",
@@ -67,9 +79,6 @@ _CommentOnlyField = Literal[
     "parent_id",
 ]
 
-PostField = Union[_CommonField, _PostOnlyField]
-CommentField = Union[_CommonField, _CommentOnlyField]
-
 SubredditField = Literal[
     "created_utc",
     "description",
@@ -83,6 +92,8 @@ SubredditField = Literal[
     # add "_meta*" names here if they are concrete strings
 ]
 
+PostField = Union[_CommonField, _PostOnlyField]
+CommentField = Union[_CommonField, _CommentOnlyField]
 AllFields = Union[PostField, CommentField, SubredditField]
 
 TimeSeriesPrecision = Literal["year", "quarter", "month", "week", "day", "hour", "minute"]
@@ -102,6 +113,17 @@ MAX_SHORT_LINK_PATHS = 1000
 class ArcticShiftGroup:
     """
     Associates fields with endpoint/lookup combinations so they can be validated later on.
+
+    Note:
+    ArcticShiftGroup metadata structure is
+    List[
+        Tuple[
+            List[endpoints: ArcticShiftEndpointTypes],
+            List[lookups: ArcticShiftLookupTypes]
+        ]
+    ]
+    each tuple in the list is the possible combinations of endpoints and lookups that the field is valid for.
+    (+ is used for URI endpoint construction)
     """
 
     def __init__(
@@ -219,7 +241,9 @@ class ArcticShiftModel(BaseModel):
                 (["time_series"], [None]),
             ]
         ),
-        Field(),
+        # StrictStr type is ONLY FOR IDE LINTERS
+        # Strings not matching DateTime format would be caught later
+        Field(union_mode="left_to_right"),
     ] = None
 
     before: Annotated[
@@ -235,7 +259,9 @@ class ArcticShiftModel(BaseModel):
                 (["time_series"], [None]),
             ]
         ),
-        Field(),
+        # StrictStr type is ONLY FOR IDE LINTERS
+        # Strings not matching DateTime format would be caught later
+        Field(union_mode="left_to_right"),
     ] = None
 
     limit: Annotated[
@@ -550,7 +576,9 @@ class ArcticShiftModel(BaseModel):
                 (["users"], ["search"]),
             ]
         ),
-        Field(),
+        # StrictStr type is ONLY FOR IDE LINTERS
+        # Strings not matching DateTime format would be caught later
+        Field(union_mode="left_to_right"),
     ] = None
 
     min_karma: Annotated[
@@ -621,6 +649,8 @@ class ArcticShiftModel(BaseModel):
         "time_series": {None},
     }
 
+    _TEMPORAL_FIELDS: ClassVar[Tuple[str, ...]] = ("after", "before", "active_since")
+
     @staticmethod
     def _strip_user_prefix(value: str) -> str:
         if value[:2].lower() == "u/":
@@ -655,6 +685,13 @@ class ArcticShiftModel(BaseModel):
         if isinstance(value, str) and REDDIT_ID_RE.fullmatch(value):
             return value
         raise ValueError("Value must be a valid reddit base36 id")
+
+    @field_validator(*_TEMPORAL_FIELDS, mode="after")
+    @classmethod
+    def validate_temporal_value(cls, value):
+        if isinstance(value, str):
+            raise ValueError("Value must be a valid datetime (ISO 8601) or integer timestamp (epoch)")
+        return value
 
     @model_validator(mode="after")
     def validate_lookup(self) -> Self:
@@ -788,15 +825,25 @@ class ArcticShiftModel(BaseModel):
         return ",".join(items)
 
     def _normalize_datetime_fields(self) -> None:
-        for attr in ("after", "before", "active_since"):
+        for attr in self._TEMPORAL_FIELDS:
             value = getattr(self, attr)
-            if isinstance(value, DateTime):
+            if isinstance(value, DateTime):  # pass for int and None
                 setattr(self, attr, value.int_timestamp)
 
     def _validate_temporal_order(self) -> None:
+        # after and before should be either None or int now
         if isinstance(self.after, int) and isinstance(self.before, int):
             if self.after >= self.before:
                 raise ValueError("'after' must be less than 'before'.")
+        elif self.after is not None and self.before is None:
+            warnings.warn("'after' is set but 'before' is not, " \
+            "BAScraper will not attempt to iterate and will only fetch a single page of results.", UserWarning)
+        elif self.after is None and isinstance(self.before, int):
+            warnings.warn("'before' is set but 'after' is not, " \
+            "BAScraper will not attempt to iterate and will only fetch a single page of results.", UserWarning)
+        else:  # both None
+            warnings.warn("'after' and 'before' are both None, " \
+            "BAScraper will not attempt to iterate and will only fetch a single page of results.", UserWarning)
 
     def _validate_limit(self) -> None:
         if self.limit is None:
@@ -854,3 +901,23 @@ class ArcticShiftModel(BaseModel):
                 raise ValueError(
                     "'frequency' is required when aggregate=created_utc for the search/aggregate lookup."
                 )
+
+
+if __name__ == "__main__":
+    # Example usage and validation
+    try:
+        example = ArcticShiftModel(
+            endpoint="posts",
+            lookup="search",
+            subreddit="r/python",
+            # after="2023-01-01",
+            # before="2023-10-26T15:30:00Z",
+            limit=50,
+            sort="desc",
+            title="release",
+            fields=["id", "title", "created_utc"],
+        )
+        print(example.model_dump_json(indent=4, exclude_none=True))
+    except Exception as e:
+        print(f"Error:\n{e}")
+
