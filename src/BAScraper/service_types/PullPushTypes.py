@@ -11,7 +11,6 @@ from pydantic import (
 from pydantic_extra_types.pendulum_dt import DateTime
 import re
 
-
 PullPushEndpointTypes = Literal['submission', 'comment']
 
 class PullPushGroup:
@@ -24,35 +23,9 @@ class PullPushGroup:
         self.group: List[PullPushEndpointTypes] = \
             group if isinstance(group, list) else [group]
 
-
-ArcticShiftEndpointTypes = Literal[
-    'posts', 'comments', 'subreddits', 'users',
-    'short_links', 'time_series'
-]
-ArcticShiftLookupTypes = Literal[
-    'ids', 'search', # all (4 main stuffs)
-    'aggregate',  # posts, comments
-    'tree',  # comments
-    'rules', 'wikis', 'wikis/list'  # subreddits
-    'interactions/users', 'interactions/users/list', 'interactions/subreddits',  # users
-    'flairs',  # users (aggregated flairs)
-]
-
-class ArcticShiftGroup:
-    def __init__(self,
-                 group: Union[
-                     List[ArcticShiftEndpointTypes],
-                     ArcticShiftEndpointTypes,
-                    ],
-                 lookup_type: Union[
-                     List[ArcticShiftLookupTypes],
-                     ArcticShiftLookupTypes,
-                 ]
-    ) -> None:
-        self.group: List[ArcticShiftEndpointTypes] = \
-            group if isinstance(group, list) else [group]
-        self.lookup_type: List[ArcticShiftLookupTypes] = \
-            lookup_type if isinstance(lookup_type, list) else [lookup_type]
+reddit_id_rule = r'^[0-9a-zA-Z]+$'  # Base36 ID rule
+reddit_username_rule = r'^[A-Za-z0-9_-]{3,20}$'  # Reddit username rule
+subreddit_name_rule = r'^[A-Za-z0-9][A-Za-z0-9_]{1,20}$'  # Subreddit name rule
 
 ###############################################################
 
@@ -89,7 +62,7 @@ class PullPushModel(BaseModel):
     ids: Annotated[
         List[Annotated[
             StrictStr,
-            Field(pattern=r'^[0-9a-zA-Z]+$')
+            Field(pattern=reddit_id_rule)
         ]] | str | None,
         PullPushGroup(['submission', 'comment']),
         Field()
@@ -116,21 +89,13 @@ class PullPushModel(BaseModel):
     author: Annotated[
         StrictStr | None,
         PullPushGroup(['submission', 'comment']),
-        Field(
-            min_length=3,
-            max_length=20,
-            pattern=r'^[A-Za-z0-9_-]$'  # Reddit username rule
-        )
+        Field(pattern=reddit_username_rule)
     ] = None
 
     subreddit: Annotated[
         StrictStr | None,
         PullPushGroup(['submission', 'comment']),
-        Field(
-            min_length=1,
-            max_length=20,
-            pattern=r'^[A-Za-z0-9][A-Za-z0-9_]$'  # Subreddit name rule
-        )
+        Field(pattern=subreddit_name_rule)
     ] = None
 
     after: Annotated[
@@ -150,7 +115,7 @@ class PullPushModel(BaseModel):
     link_id: Annotated[
         StrictStr | None,
         PullPushGroup('comment'),
-        Field(pattern=r'^[0-9a-zA-Z]+$')  # Base36 ID rule
+        Field(pattern=reddit_id_rule)  # Base36 ID rule
     ] = None
 
     ### ⬇️ for submission endpoint only ⬇️ ###
@@ -260,24 +225,6 @@ class PullPushModel(BaseModel):
         #   if string(else), validate if it's in `<id>,<id>,<id>,...` form
 
         return self
-
-
-class ArcticShiftModel(BaseModel):
-    """
-    Docstring for ArcticShiftModel
-    """
-    _BASE_URL: StrictStr = "arctic-shift.photon-reddit.com/api"
-    endpoint: ArcticShiftEndpointTypes
-
-    no_coro: Annotated[
-        StrictInt,
-        Field(gt=0)
-    ] = 3  # number of coroutines
-
-    interval_sleep_ms: Annotated[
-        StrictInt,
-        Field(ge=0)
-    ] = 500
 
 
 if __name__ == "__main__":
