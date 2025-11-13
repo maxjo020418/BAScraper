@@ -8,6 +8,7 @@ from typing import (
     Self,
     Tuple,
     Union,
+    Callable
 )
 
 from pydantic import (
@@ -46,6 +47,7 @@ ArcticShiftLookupTypes = Literal[
     "interactions/users/list",
     "interactions/subreddits",
     "aggregate_flairs",
+    None,  # for time_series and short_links
 ]
 
 _CommonField = Literal[
@@ -116,12 +118,14 @@ class ArcticShiftGroup:
 
     Note:
     ArcticShiftGroup metadata structure is
+    ```
     List[
         Tuple[
             List[endpoints: ArcticShiftEndpointTypes],
             List[lookups: ArcticShiftLookupTypes]
         ]
     ]
+    ```
     each tuple in the list is the possible combinations of endpoints and lookups that the field is valid for.
     (+ is used for URI endpoint construction)
     """
@@ -145,10 +149,10 @@ class ArcticShiftModel(BaseModel):
 
     _BASE_URL: StrictStr = "https://arctic-shift.photon-reddit.com/api"
     endpoint: ArcticShiftEndpointTypes
-    lookup: Optional[ArcticShiftLookupTypes] = "search"
+    lookup: ArcticShiftLookupTypes
 
-    no_coro: Annotated[StrictInt, Field(gt=0)] = 3
-    interval_sleep_ms: Annotated[StrictInt, Field(ge=0)] = 500
+    no_coro: StrictInt = Field(default=3, gt=0)
+    interval_sleep_ms: StrictInt = Field(default=500, ge=0)
 
     ids: Annotated[
         List[Annotated[StrictStr, Field(pattern=reddit_id_rule)]] | StrictStr | None,
@@ -157,8 +161,7 @@ class ArcticShiftModel(BaseModel):
                 (["posts", "comments", "subreddits", "users"], ["ids"]),
             ]
         ),
-        Field(max_length=MAX_IDS),
-    ] = None
+    ] = Field(default=None, max_length=MAX_IDS)
 
     md2html: Annotated[
         StrictBool | None,
@@ -169,8 +172,7 @@ class ArcticShiftModel(BaseModel):
                 (["comments"], ["tree"]),
             ]
         ),
-        Field(),
-    ] = None
+    ] = Field(default=None)
 
     fields: Annotated[
         List[PostField | CommentField | SubredditField] | StrictStr | None,
@@ -180,8 +182,7 @@ class ArcticShiftModel(BaseModel):
                 (["posts", "comments", "subreddits"], ["search"]),
             ]
         ),
-        Field(),
-    ] = None
+    ] = Field(default=None)
 
     author: Annotated[
         StrictStr | None,
@@ -200,8 +201,7 @@ class ArcticShiftModel(BaseModel):
                 ),
             ]
         ),
-        Field(pattern=reddit_username_rule),
-    ] = None
+    ] = Field(default=None, pattern=reddit_username_rule)
 
     subreddit: Annotated[
         StrictStr | None,
@@ -215,8 +215,7 @@ class ArcticShiftModel(BaseModel):
                 ),
             ]
         ),
-        Field(pattern=subreddit_name_rule),
-    ] = None
+    ] = Field(default=None, pattern=subreddit_name_rule)
 
     author_flair_text: Annotated[
         StrictStr | None,
@@ -225,8 +224,7 @@ class ArcticShiftModel(BaseModel):
                 (["posts", "comments"], ["search", "search/aggregate"]),
             ]
         ),
-        Field(min_length=1),
-    ] = None
+    ] = Field(default=None, min_length=1)
 
     after: Annotated[
         DateTime | StrictInt | StrictStr | None,
@@ -243,8 +241,7 @@ class ArcticShiftModel(BaseModel):
         ),
         # StrictStr type is ONLY FOR IDE LINTERS
         # Strings not matching DateTime format would be caught later
-        Field(union_mode="left_to_right"),
-    ] = None
+    ] = Field(default=None, union_mode="left_to_right")
 
     before: Annotated[
         DateTime | StrictInt | StrictStr | None,
@@ -261,8 +258,7 @@ class ArcticShiftModel(BaseModel):
         ),
         # StrictStr type is ONLY FOR IDE LINTERS
         # Strings not matching DateTime format would be caught later
-        Field(union_mode="left_to_right"),
-    ] = None
+    ] = Field(default=None, union_mode="left_to_right")
 
     limit: Annotated[
         StrictInt | Literal["auto"] | Literal[""] | None,
@@ -278,8 +274,7 @@ class ArcticShiftModel(BaseModel):
                 ),
             ]
         ),
-        Field(),
-    ] = None
+    ] = Field(default=None)
 
     sort: Annotated[
         Literal["asc", "desc"] | None,
@@ -289,9 +284,8 @@ class ArcticShiftModel(BaseModel):
                 (["subreddits"], ["search"]),
                 (["users"], ["search"]),
             ]
-        ),
-        Field(),
-    ] = None
+        )
+    ] = Field(default=None)
 
     crosspost_parent_id: Annotated[
         StrictStr | None,
@@ -300,8 +294,7 @@ class ArcticShiftModel(BaseModel):
                 (["posts"], ["search"]),
             ]
         ),
-        Field(pattern=reddit_id_rule),
-    ] = None
+    ] = Field(default=None)
 
     over_18: Annotated[
         StrictBool | None,
@@ -310,8 +303,7 @@ class ArcticShiftModel(BaseModel):
                 (["posts"], ["search"]),
             ]
         ),
-        Field(),
-    ] = None
+    ] = Field(default=None)
 
     spoiler: Annotated[
         StrictBool | None,
@@ -320,8 +312,7 @@ class ArcticShiftModel(BaseModel):
                 (["posts"], ["search"]),
             ]
         ),
-        Field(),
-    ] = None
+    ] = Field(default=None)
 
     title: Annotated[
         StrictStr | None,
@@ -330,8 +321,7 @@ class ArcticShiftModel(BaseModel):
                 (["posts"], ["search"]),
             ]
         ),
-        Field(min_length=1),
-    ] = None
+    ] = Field(default=None, min_length=1)
 
     selftext: Annotated[
         StrictStr | None,
@@ -340,8 +330,7 @@ class ArcticShiftModel(BaseModel):
                 (["posts"], ["search"]),
             ]
         ),
-        Field(min_length=1),
-    ] = None
+    ] = Field(default=None, min_length=1)
 
     link_flair_text: Annotated[
         StrictStr | None,
@@ -350,8 +339,7 @@ class ArcticShiftModel(BaseModel):
                 (["posts"], ["search"]),
             ]
         ),
-        Field(min_length=1),
-    ] = None
+    ] = Field(default=None, min_length=1)
 
     query: Annotated[
         StrictStr | None,
@@ -360,8 +348,7 @@ class ArcticShiftModel(BaseModel):
                 (["posts"], ["search"]),
             ]
         ),
-        Field(min_length=1),
-    ] = None
+    ] = Field(default=None, min_length=1)
 
     url: Annotated[
         StrictStr | None,
@@ -370,8 +357,7 @@ class ArcticShiftModel(BaseModel):
                 (["posts"], ["search"]),
             ]
         ),
-        Field(min_length=1),
-    ] = None
+    ] = Field(default=None, min_length=1)
 
     url_exact: Annotated[
         StrictBool | None,
@@ -380,8 +366,7 @@ class ArcticShiftModel(BaseModel):
                 (["posts"], ["search"]),
             ]
         ),
-        Field(),
-    ] = None
+    ] = Field(default=None)
 
     body: Annotated[
         StrictStr | None,
@@ -390,8 +375,7 @@ class ArcticShiftModel(BaseModel):
                 (["comments"], ["search"]),
             ]
         ),
-        Field(min_length=1),
-    ] = None
+    ] = Field(default=None, min_length=1)
 
     link_id: Annotated[
         StrictStr | None,
@@ -400,8 +384,7 @@ class ArcticShiftModel(BaseModel):
                 (["comments"], ["search", "tree"]),
             ]
         ),
-        Field(pattern=reddit_id_rule),
-    ] = None
+    ] = Field(default=None)
 
     parent_id: Annotated[
         StrictStr | None,
@@ -410,8 +393,7 @@ class ArcticShiftModel(BaseModel):
                 (["comments"], ["search", "tree"]),
             ]
         ),
-        Field(),
-    ] = None
+    ] = Field(default=None)
 
     start_breadth: Annotated[
         StrictInt | None,
@@ -420,8 +402,7 @@ class ArcticShiftModel(BaseModel):
                 (["comments"], ["tree"]),
             ]
         ),
-        Field(ge=0),
-    ] = None
+    ] = Field(default=None, ge=0)
 
     start_depth: Annotated[
         StrictInt | None,
@@ -430,8 +411,7 @@ class ArcticShiftModel(BaseModel):
                 (["comments"], ["tree"]),
             ]
         ),
-        Field(ge=0),
-    ] = None
+    ] = Field(default=None, ge=0)
 
     aggregate: Annotated[
         Literal["created_utc", "author", "subreddit"] | None,
@@ -440,8 +420,7 @@ class ArcticShiftModel(BaseModel):
                 (["posts", "comments"], ["search/aggregate"]),
             ]
         ),
-        Field(),
-    ] = None
+    ] = Field(default=None)
 
     frequency: Annotated[
         StrictStr | None,
@@ -450,8 +429,7 @@ class ArcticShiftModel(BaseModel):
                 (["posts", "comments"], ["search/aggregate"]),
             ]
         ),
-        Field(min_length=1),
-    ] = None
+    ] = Field(default=None, min_length=1)
 
     min_count: Annotated[
         StrictInt | None,
@@ -464,8 +442,7 @@ class ArcticShiftModel(BaseModel):
                 ),
             ]
         ),
-        Field(ge=0),
-    ] = None
+    ] = Field(default=None, ge=0)
 
     subreddit_prefix: Annotated[
         StrictStr | None,
@@ -474,8 +451,7 @@ class ArcticShiftModel(BaseModel):
                 (["subreddits"], ["search"]),
             ]
         ),
-        Field(pattern=subreddit_name_rule),
-    ] = None
+    ] = Field(default=None, pattern=subreddit_name_rule)
 
     min_subscribers: Annotated[
         StrictInt | None,
@@ -484,8 +460,7 @@ class ArcticShiftModel(BaseModel):
                 (["subreddits"], ["search"]),
             ]
         ),
-        Field(ge=0),
-    ] = None
+    ] = Field(default=None, ge=0)
 
     max_subscribers: Annotated[
         StrictInt | None,
@@ -494,8 +469,7 @@ class ArcticShiftModel(BaseModel):
                 (["subreddits"], ["search"]),
             ]
         ),
-        Field(ge=0),
-    ] = None
+    ] = Field(default=None, ge=0)
 
     over18: Annotated[
         StrictBool | None,
@@ -504,8 +478,7 @@ class ArcticShiftModel(BaseModel):
                 (["subreddits"], ["search"]),
             ]
         ),
-        Field(),
-    ] = None
+    ] = Field(default=None)
 
     sort_type: Annotated[
         Literal["created_utc", "subscribers", "subreddit", "author", "total_karma"] | None,
@@ -515,8 +488,7 @@ class ArcticShiftModel(BaseModel):
                 (["users"], ["search"]),
             ]
         ),
-        Field(),
-    ] = None
+    ] = Field(default=None)
 
     subreddits: Annotated[
         List[Annotated[StrictStr, Field(pattern=subreddit_name_rule)]] | StrictStr | None,
@@ -525,8 +497,7 @@ class ArcticShiftModel(BaseModel):
                 (["subreddits"], ["rules"]),
             ]
         ),
-        Field(max_length=MAX_SUBREDDITS),
-    ] = None
+    ] = Field(default=None, max_length=MAX_SUBREDDITS)
 
     paths: Annotated[
         List[StrictStr] | StrictStr | None,
@@ -536,8 +507,7 @@ class ArcticShiftModel(BaseModel):
                 (["short_links"], [None]),
             ]
         ),
-        Field(),
-    ] = None
+    ] = Field(default=None)
 
     author_prefix: Annotated[
         StrictStr | None,
@@ -546,8 +516,7 @@ class ArcticShiftModel(BaseModel):
                 (["users"], ["search"]),
             ]
         ),
-        Field(min_length=1),
-    ] = None
+    ] = Field(default=None, min_length=1)
 
     min_num_posts: Annotated[
         StrictInt | None,
@@ -556,8 +525,7 @@ class ArcticShiftModel(BaseModel):
                 (["users"], ["search"]),
             ]
         ),
-        Field(ge=0),
-    ] = None
+    ] = Field(default=None, ge=0)
 
     min_num_comments: Annotated[
         StrictInt | None,
@@ -566,8 +534,7 @@ class ArcticShiftModel(BaseModel):
                 (["users"], ["search"]),
             ]
         ),
-        Field(ge=0),
-    ] = None
+    ] = Field(default=None, ge=0)
 
     active_since: Annotated[
         DateTime | StrictInt | StrictStr | None,
@@ -578,8 +545,7 @@ class ArcticShiftModel(BaseModel):
         ),
         # StrictStr type is ONLY FOR IDE LINTERS
         # Strings not matching DateTime format would be caught later
-        Field(union_mode="left_to_right"),
-    ] = None
+    ] = Field(default=None, union_mode="left_to_right")
 
     min_karma: Annotated[
         StrictInt | None,
@@ -588,8 +554,7 @@ class ArcticShiftModel(BaseModel):
                 (["users"], ["search"]),
             ]
         ),
-        Field(ge=0),
-    ] = None
+    ] = Field(default=None, ge=0)
 
     weight_posts: Annotated[
         StrictFloat | None,
@@ -598,8 +563,7 @@ class ArcticShiftModel(BaseModel):
                 (["users"], ["interactions/subreddits"]),
             ]
         ),
-        Field(ge=0),
-    ] = None
+    ] = Field(default=None, ge=0)
 
     weight_comments: Annotated[
         StrictFloat | None,
@@ -608,8 +572,7 @@ class ArcticShiftModel(BaseModel):
                 (["users"], ["interactions/subreddits"]),
             ]
         ),
-        Field(ge=0),
-    ] = None
+    ] = Field(default=None, ge=0)
 
     key: Annotated[
         StrictStr | None,
@@ -618,8 +581,7 @@ class ArcticShiftModel(BaseModel):
                 (["time_series"], [None]),
             ]
         ),
-        Field(min_length=1),
-    ] = None
+    ] = Field(default=None, min_length=1)
 
     precision: Annotated[
         TimeSeriesPrecision | None,
@@ -628,8 +590,7 @@ class ArcticShiftModel(BaseModel):
                 (["time_series"], [None]),
             ]
         ),
-        Field(),
-    ] = None
+    ] = Field(default=None)
 
     _ALLOWED_LOOKUPS: ClassVar[
         Dict[ArcticShiftEndpointTypes, set[Optional[ArcticShiftLookupTypes]]]
@@ -665,30 +626,31 @@ class ArcticShiftModel(BaseModel):
 
     @field_validator("author", "author_prefix", mode="before")
     @classmethod
-    def normalize_author(cls, value):
+    def normalize_author(cls, value: str | None):
         if isinstance(value, str):
             return cls._strip_user_prefix(value)
         return value
 
     @field_validator("subreddit", "subreddit_prefix", mode="before")
     @classmethod
-    def normalize_subreddit(cls, value):
+    def normalize_subreddit(cls, value: str | None):
         if isinstance(value, str):
             return cls._strip_subreddit_prefix(value)
         return value
 
     @field_validator("parent_id", "link_id", "crosspost_parent_id", mode="before")
     @classmethod
-    def validate_single_id(cls, value):
-        if value in (None, ""):
+    def validate_single_id(cls, value: str | None):
+        if isinstance(value, str):
+            if not len(value):  # empty str
+                return value
+            assert REDDIT_ID_RE.fullmatch(value)
+        else:  # when None
             return value
-        if isinstance(value, str) and REDDIT_ID_RE.fullmatch(value):
-            return value
-        raise ValueError("Value must be a valid reddit base36 id")
 
     @field_validator(*_TEMPORAL_FIELDS, mode="after")
     @classmethod
-    def validate_temporal_value(cls, value):
+    def validate_temporal_value(cls, value: DateTime | int | str | None):
         if isinstance(value, str):
             raise ValueError("Value must be a valid datetime (ISO 8601) or integer timestamp (epoch)")
         return value
@@ -697,17 +659,26 @@ class ArcticShiftModel(BaseModel):
     def validate_lookup(self) -> Self:
         allowed = self._ALLOWED_LOOKUPS[self.endpoint]
         if self.lookup not in allowed:
-            allowed_values = ", ".join(sorted(str(item) for item in allowed if item))
-            suffix = " or no lookup" if None in allowed else ""
+            allowed_values = \
+                f"\"lookup field not needed for `{self.endpoint}`\"" \
+                if None in allowed else ", ".join(sorted(str(item) for item in allowed if item))
             raise ValueError(
                 f"Lookup '{self.lookup}' is not supported for endpoint '{self.endpoint}'. "
-                f"Allowed values: {allowed_values}{suffix}"
+                f"Allowed values: {allowed_values}"
             )
 
         for field_name in self.model_fields_set:
+            # accessing `model_fields` via instance is deprecated,
+            # should be accessed only from class itself
             metadata = type(self).model_fields[field_name].metadata
-            group_meta = next((meta for meta in metadata if isinstance(meta, ArcticShiftGroup)), None)
-            if not group_meta:
+
+            # metadatas is a list of metadata(Attributes) within the set fields (model_fields_set)
+            # below checks/finds `ArcticShiftGroup` exists within the metadata(s)
+            group_meta = next(
+                    (meta for meta in metadata if isinstance(meta, ArcticShiftGroup)), 
+                    None
+                )
+            if not group_meta:  # skip if no `ArcticShiftGroup` is found
                 continue
 
             valid_combination = False
@@ -804,7 +775,7 @@ class ArcticShiftModel(BaseModel):
         max_items: Optional[int],
         pattern: Optional[re.Pattern[str]],
         field_name: str,
-        transform=None,
+        transform: Callable[[str], str] | None = None,
     ) -> str:
         if isinstance(value, list):
             items = value
@@ -901,23 +872,3 @@ class ArcticShiftModel(BaseModel):
                 raise ValueError(
                     "'frequency' is required when aggregate=created_utc for the search/aggregate lookup."
                 )
-
-
-if __name__ == "__main__":
-    # Example usage and validation
-    try:
-        example = ArcticShiftModel(
-            endpoint="posts",
-            lookup="search",
-            subreddit="r/python",
-            # after="2023-01-01",
-            # before="2023-10-26T15:30:00Z",
-            limit=50,
-            sort="desc",
-            title="release",
-            fields=["id", "title", "created_utc"],
-        )
-        print(example.model_dump_json(indent=4, exclude_none=True))
-    except Exception as e:
-        print(f"Error:\n{e}")
-
