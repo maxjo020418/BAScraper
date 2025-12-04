@@ -57,7 +57,7 @@ you can install the package via pip
 ```bash
 pip install BAScraper
 ```
-Python 3.11+ is **required** (`asyncio.TaskGroup` is used)
+Python 3.12+ is **required**
 
 ### Usage Example
 ```python
@@ -96,7 +96,7 @@ async def test2():
     result1 = await asa.fetch(
         mode='submissions_search',
         subreddit='cars',
-        # get_comments=True,  # can be uncommented to the comment
+        # get_comments=True,  # can be uncommented to fetch comments
         after='2024-07-01',
         before='2024-07-05T03:00:00',
         file_name='test2-1',
@@ -139,7 +139,7 @@ if __name__ == '__main__':
 
 > [!NOTE]
 > When using multiple requests, (as in multiple functions under `PullPushAsync`)
-> it is highly recommended to use all the functions under the same class 
+> it is highly recommended to use the functions under the same instance 
 > because all the request pool related variables would be shared in that case.
 > 
 > Also, when re-running scripts using this, pools recording the request status is reset every time. 
