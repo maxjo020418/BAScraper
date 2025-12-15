@@ -127,7 +127,37 @@ class ArcticShiftGroup:
     ]
     ```
     each tuple in the list is the possible combinations of endpoints and lookups that the field is valid for.
-    (+ is used for URI endpoint construction)
+    (is used for URI endpoint construction)
+
+    example use in `ArcticShiftModel`:
+    ```python
+    md2html: Annotated[
+        StrictBool | None,
+        ArcticShiftGroup(
+            [
+                (["posts", "comments", "subreddits", "users"], ["ids"]),
+                (["posts", "comments"], ["search"]),
+                (["comments"], ["tree"]),
+            ]
+        ),
+    ] = Field(default=None)
+    ```
+    can be interpreted as:
+
+    parameter `md2html` is type `StrictBool | None` with default val of `None`,
+    and is used/valid on the following endpoints:
+    ```
+    /api/posts/ids
+    /api/comments/ids
+    /api/subreddits/ids
+    /api/users/ids
+
+    /api/posts/search
+    /api/comments/search
+
+    /api/comments/tree
+    ``` 
+    so a possible `4*1 + 2*1 + 1*1 = 7` endpoints
     """
 
     def __init__(
@@ -814,7 +844,8 @@ class ArcticShiftModel(BaseModel):
             "BAScraper will not attempt to iterate and will only fetch a single page of results.", UserWarning)
         else:  # both None
             warnings.warn("'after' and 'before' are both None, " \
-            "BAScraper will not attempt to iterate and will only fetch a single page of results.", UserWarning)
+            "BAScraper will not attempt to iterate and will only fetch a single page of results. "
+            "(limited to 100 entries)", UserWarning)
 
     def _validate_limit(self) -> None:
         if self.limit is None:

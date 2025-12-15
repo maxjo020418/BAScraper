@@ -43,7 +43,6 @@ class PullPushModel(BaseModel):
     endpoint: PullPushEndpointTypes
 
     no_coro: StrictInt = Field(default=3, gt=0)  # number of coroutines
-
     interval_sleep_ms: StrictInt = Field(default=500, ge=0)
 
     # TODO: check if there are duplicate results and add duplicate handling if needed.

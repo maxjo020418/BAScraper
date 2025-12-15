@@ -1,6 +1,7 @@
 Let the function accept both dict and model
 
 If you want to allow flexibility:
+
 ```python
 from typing import Union
 
