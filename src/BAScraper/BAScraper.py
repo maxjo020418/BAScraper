@@ -1,38 +1,72 @@
-from typing import Union
+from typing import Union, Callable
 import httpx
 import asyncio
 import math
+import logging
 
 from BAScraper.service_types import PullPushModel, ArcticShiftModel
+from BAScraper.services import PullPush, ArcticShift
+from BAScraper import BAConfig
 
-async def get(settings: Union[PullPushModel, dict]):
-    if not isinstance(settings, PullPushModel):
-        v_settings: PullPushModel = PullPushModel.model_validate(settings)
-    else:
-        v_settings = settings
-    
-    # time partitioned auto pagination
-    if v_settings.after and v_settings.before:
-        # after and before is set to int but type checker still thinks it can be datetime
-        # so this part though redundant, is needed.
-        assert isinstance(v_settings.after, int) and isinstance(v_settings.before, int)
+class BAScraper:
+    def __init__(self, config: BAConfig):
+        self.logger = logging.getLogger(__name__)
+        self.timezone = config.timezone
+
+    async def get(self, settings: Union[PullPushModel, ArcticShiftModel, dict]):
+
+        v_settings: PullPushModel | ArcticShiftModel
+        fetcher: PullPush | ArcticShift
+
+        # https://peps.python.org/pep-0636/#adding-a-ui-matching-objects
+        match settings:
+            case PullPushModel():
+                fetcher = PullPush()
+                v_settings = settings
+            case ArcticShiftModel():
+                fetcher = ArcticShift()
+                v_settings = settings
+            case dict():  # service_type param needs to be added in the settings dict
+                try: 
+                    service_name = settings['service_type']
+                except: raise ValueError(
+                    "`service_type` needs to exist to use dict input (to set the service type)")
+                match service_name:
+                    case "PullPush":
+                        v_settings = PullPushModel.model_validate(settings)
+                    case "ArcticShift":
+                        v_settings = ArcticShiftModel.model_validate(settings)
+                    case _:
+                        raise ValueError("`service_type` needs to be either 'PullPush' or 'ArcticShift'")
+            case _:
+                raise TypeError("Wrong setting type for `get`, " \
+                "needs to be one of PullPushModel, ArcticShiftModel or dict")
         
-        # split-up time ranges into segments
-        # after/before are inclusive for the API endpoints
-        segment_duration = (v_settings.before - v_settings.after) / v_settings.no_coro
-        segments = [
-            [
-                math.ceil(v_settings.after + s * segment_duration),
-                math.ceil((v_settings.after + (s + 1) * segment_duration)) - 1
+        # time partitioned auto pagination
+        if v_settings.after and v_settings.before:
+            # after and before is set to int but type checker still thinks it can be datetime
+            # so this part though redundant, is needed.
+            assert isinstance(v_settings.after, int) and isinstance(v_settings.before, int)
+            
+            # split-up time ranges into segments
+            # after/before are inclusive for the API endpoints
+            segment_duration = (v_settings.before - v_settings.after) / v_settings.no_coro
+            segments = [
+                [
+                    math.ceil(v_settings.after + s * segment_duration),
+                    math.ceil((v_settings.after + (s + 1) * segment_duration)) - 1
+                ]
+                for s in range(v_settings.no_coro)
             ]
-            for s in range(v_settings.no_coro)
-        ]
-        
-        # clamping the final end time to be exactly `before`
-        segments[-1][-1] = v_settings.before
+            self.logger.info(f'segments for coro: {segments}')
+            
+            # clamping the final end time to be exactly `before`
+            segments[-1][-1] = v_settings.before
 
-        async with httpx.AsyncClient(http2=True) as client:
+            semaphore = asyncio.Semaphore(v_settings.no_coro)
+
+            async with httpx.AsyncClient(http2=True) as client:
+                pass
+        
+        else:  # no time partitioned pagination, just single request to the endpoint
             pass
-    
-    else:  # no time partitioned pagination, just single request to the endpoint
-        pass

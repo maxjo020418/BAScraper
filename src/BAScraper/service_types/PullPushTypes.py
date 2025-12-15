@@ -40,6 +40,8 @@ class PullPushModel(BaseModel):
     Docstring for PullPushModel
     """
     _BASE_URL: StrictStr = "https://api.pullpush.io/reddit/search"
+    service_type: StrictStr | None = None  # only used when passed in as dict (for identification)
+
     endpoint: PullPushEndpointTypes
 
     no_coro: StrictInt = Field(default=3, gt=0)  # number of coroutines

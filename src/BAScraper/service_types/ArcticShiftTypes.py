@@ -178,6 +178,8 @@ class ArcticShiftModel(BaseModel):
     """
 
     _BASE_URL: StrictStr = "https://arctic-shift.photon-reddit.com/api"
+    service_type: StrictStr | None = None  # only used when passed in as dict (for identification)
+
     endpoint: ArcticShiftEndpointTypes
     lookup: ArcticShiftLookupTypes
 
