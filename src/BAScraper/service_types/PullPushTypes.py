@@ -46,8 +46,8 @@ class PullPushModel(BaseModel):
 
     no_coro: StrictInt = Field(default=3, gt=0)  # number of coroutines
     interval_sleep_ms: StrictInt = Field(default=500, ge=0)
-
-    # TODO: check if there are duplicate results and add duplicate handling if needed.
+    max_retries: int = Field(default=5, ge=0)
+    backoff_factor: int | float = Field(default=1, ge=0)
 
     ### ⬇️ for all endpoints ⬇️ ###
 

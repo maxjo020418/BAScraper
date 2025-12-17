@@ -1,3 +1,3 @@
-from .BaseService import BaseService
-from .PullPush import PullPush
-from .ArcticShift import ArcticShift
+from .base_service import BaseService
+from .pullpush import PullPush
+from .arcticshift import ArcticShift

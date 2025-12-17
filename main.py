@@ -1,5 +1,10 @@
-from src.BAScraper.service_types.ArcticShiftTypes import ArcticShiftModel
-from src.BAScraper.service_types.PullPushTypes import PullPushModel
+from BAScraper.service_types import ArcticShiftModel
+from BAScraper.service_types import PullPushModel
+
+from BAScraper import BAScraper
+from BAScraper.utils import BAConfig
+
+import logging
 
 def main():
     try:
@@ -33,6 +38,14 @@ def main():
 
     except Exception as e:
         raise(e)
+
+    bas = BAScraper(
+        BAConfig(
+            log_level=logging.DEBUG,
+            log_file_path="bascraper.log",
+            log_file_mode="w",
+        )
+    )
 
 
 if __name__ == "__main__":

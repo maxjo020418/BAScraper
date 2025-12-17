@@ -114,7 +114,7 @@ MAX_SHORT_LINK_PATHS = 1000
 
 class ArcticShiftGroup:
     """
-    Associates fields with endpoint/lookup combinations so they can be validated later on.
+    Associates fields with `endpoint/lookup` combinations so they can be validated later on.
 
     Note:
     ArcticShiftGroup metadata structure is
@@ -185,6 +185,8 @@ class ArcticShiftModel(BaseModel):
 
     no_coro: StrictInt = Field(default=3, gt=0)
     interval_sleep_ms: StrictInt = Field(default=500, ge=0)
+    max_retries: int = Field(default=5, ge=0)
+    backoff_factor: int | float = Field(default=1, ge=0)
 
     ids: Annotated[
         List[Annotated[StrictStr, Field(pattern=reddit_id_rule)]] | StrictStr | None,
