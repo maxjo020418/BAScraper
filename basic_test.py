@@ -4,17 +4,27 @@ from BAScraper.service_types import PullPushModel
 from BAScraper import BAScraper
 from BAScraper.utils import BAConfig
 
+import datetime
+import pendulum
+
 import logging
 
 def main():
+    # !! config(validation run) needs to be run before model validation if you want logs
+    # !! because logging config is done within BAConfig model validation (init.)
+    conf = BAConfig(
+            log_level=logging.DEBUG,
+            log_file_path="bascraper.log",
+            log_file_mode="w",
+        )
     try:
         example = ArcticShiftModel(
             endpoint="comments",
-            lookup="ids",
-            ids=["123123","23we"],
+            lookup="search",
+            # ids=["123123","23we"],
             # subreddit="r/python",
-            # after="2023-01-01",
-            # # before="2023-10-26T15:30:00Z",
+            after="2023-01-01",
+            before="2023-10-26T15:30:00Z",
             # sort="asc",
             # limit=50,
             # title="release",
@@ -33,19 +43,15 @@ def main():
             # score='>=10',
             # title="eee",
             # over_18=True,
+            after=datetime.datetime(2025, 1, 1), # "2023-01-01",
+            before=pendulum.datetime(2026, 10, 2), #"2026-10-26T15:30:00Z",
         )
         print(example.model_dump_json(indent=4, exclude_none=True))
 
     except Exception as e:
         raise(e)
 
-    bas = BAScraper(
-        BAConfig(
-            log_level=logging.DEBUG,
-            log_file_path="bascraper.log",
-            log_file_mode="w",
-        )
-    )
+    bas = BAScraper(conf)
 
 
 if __name__ == "__main__":

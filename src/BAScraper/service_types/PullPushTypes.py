@@ -1,10 +1,18 @@
 from typing import (
-    Annotated, 
-    Literal, 
-    List, 
-    Self, 
-    Union
+    Annotated,
+    Any,
+    Literal,
+    List,
+    Self,
+    Union,
+    ClassVar,
+    Tuple,
 )
+
+from datetime import datetime
+import logging
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from tzlocal import get_localzone
 from pydantic import (
     BaseModel,
     Field,
@@ -12,10 +20,21 @@ from pydantic import (
     StrictInt,
     StrictStr,
     model_validator,
-    field_validator
+    field_validator,
 )
+
 from pydantic_extra_types.pendulum_dt import DateTime
 import re
+
+from BAScraper.utils import (
+    reddit_username_rule,
+    reddit_id_rule,
+    subreddit_name_rule,
+    localize_temporal_fields,
+    normalize_datetime_fields,
+    validate_temporal_order,
+    validate_temporal_value,
+)
 
 PullPushEndpointTypes = Literal['submission', 'comment']
 
@@ -29,27 +48,47 @@ class PullPushGroup:
         self.group: List[PullPushEndpointTypes] = \
             group if isinstance(group, list) else [group]
 
-reddit_id_rule = r'^[0-9a-zA-Z]+$'  # Base36 ID rule
-reddit_username_rule = r'^[A-Za-z0-9_-]{3,20}$'  # Reddit username rule
-subreddit_name_rule = r'^[A-Za-z0-9][A-Za-z0-9_]{1,20}$'  # Subreddit name rule
-
 ###############################################################
 
 class PullPushModel(BaseModel):
     """
-    Docstring for PullPushModel
+    Pydantic model describing all supported Arctic Shift API parameters.
     """
     _BASE_URL: StrictStr = "https://api.pullpush.io/reddit/search"
+    logger: ClassVar[logging.Logger] = logging.getLogger(__name__)
+
     service_type: StrictStr | None = None  # only used when passed in as dict (for identification)
+    timezone: StrictStr = Field(default=get_localzone().key,
+                                validate_default=True)
 
     endpoint: PullPushEndpointTypes
 
     no_coro: StrictInt = Field(default=3, gt=0)  # number of coroutines
     interval_sleep_ms: StrictInt = Field(default=500, ge=0)
+    cooldown_sleep_ms: StrictInt = Field(default=5000, ge=0)
     max_retries: int = Field(default=5, ge=0)
     backoff_factor: int | float = Field(default=1, ge=0)
 
-    ### ⬇️ for all endpoints ⬇️ ###
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, v: str) -> str:
+        try:
+            ZoneInfo(v)
+            cls.logger.info(f"Timezone set as: {v}")
+        except ZoneInfoNotFoundError:
+            raise ValueError(f"Invalid timezone: {v}")
+        return v
+
+    @model_validator(mode="before")
+    @classmethod
+    def localize_temporal_fields(cls, data: Any) -> Any:
+        return localize_temporal_fields(
+            data,
+            cls._TEMPORAL_FIELDS,
+            cls.logger,
+        )
+
+    ### for all endpoints ###
 
     q: Annotated[  # Search term. String / Quoted String for phrases
         StrictStr | None,
@@ -94,23 +133,27 @@ class PullPushModel(BaseModel):
     ] = Field(default=None, pattern=subreddit_name_rule)
 
     after: Annotated[
-        DateTime | int | None,
+        DateTime | datetime | StrictInt | StrictStr | None,
         PullPushGroup(['submission', 'comment'])
-    ] = Field(default=None)
+        # StrictStr type is ONLY FOR IDE LINTERS
+        # Strings not matching DateTime format would be caught later
+    ] = Field(default=None, union_mode="left_to_right")
 
     before: Annotated[
-        DateTime | int | None,
+        DateTime | datetime | StrictInt | StrictStr | None,
         PullPushGroup(['submission', 'comment'])
-    ] = Field(default=None)
+        # StrictStr type is ONLY FOR IDE LINTERS
+        # Strings not matching DateTime format would be caught later
+    ] = Field(default=None, union_mode="left_to_right")
 
-    ### ⬇️ for comment endpoint only ⬇️ ###
+    ### for comment endpoint only ###
 
     link_id: Annotated[
         StrictStr | None,
         PullPushGroup('comment')
     ] = Field(default=None, pattern=reddit_id_rule)  # Base36 ID rule
 
-    ### ⬇️ for submission endpoint only ⬇️ ###
+    ### for submission endpoint only ###
 
     title: Annotated[
         StrictStr | None,
@@ -170,6 +213,23 @@ class PullPushModel(BaseModel):
                 raise ValueError("`score` field must be a valid comparison operator")
         return v
 
+    _TEMPORAL_FIELDS: ClassVar[Tuple[str, ...]] = ("after", "before")
+
+    @field_validator(*_TEMPORAL_FIELDS, mode="after")
+    @classmethod
+    def validate_temporal_value(cls, value: DateTime | datetime | int | str | None):
+        return validate_temporal_value(value)
+
+    @field_validator("ids")
+    @classmethod
+    def check_id_list(cls, v: str | List[StrictStr]) -> StrictStr:
+        if isinstance(v, list):
+            return ','.join(v)
+        else:
+            return v
+            # TODO:
+            #   if string(else), validate if it's in `<id>,<id>,<id>,...` form
+
     @model_validator(mode="after")
     def check_endpoint_specific_fields(self) -> Self:
         for field_set in self.model_fields_set:  # per field that is set
@@ -185,25 +245,7 @@ class PullPushModel(BaseModel):
 
     @model_validator(mode="after")
     def check_date_order(self) -> Self:  # also convert datetime to epoch
-        if isinstance(self.after, DateTime):
-            self.after = self.after.int_timestamp
-        if isinstance(self.before, DateTime):
-            self.before = self.before.int_timestamp
-
-        if self.after and self.before and self.after >= self.before:
-            raise ValueError("'after' must be less than 'before'")
-
-        if self.after and not self.before:
-            pass
-
-        return self
-
-    @model_validator(mode='after')
-    def check_id_list(self) -> Self:
-        if isinstance(self.ids, list):
-            self.ids = ','.join(self.ids)
-
-        # TODO:
-        #   if string(else), validate if it's in `<id>,<id>,<id>,...` form
+        normalize_datetime_fields(self, self._TEMPORAL_FIELDS, self.timezone, self.logger)
+        validate_temporal_order(self.after, self.before)
 
         return self

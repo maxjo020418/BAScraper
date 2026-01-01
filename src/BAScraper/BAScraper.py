@@ -1,4 +1,4 @@
-from typing import Union, Callable
+from typing import Union
 import httpx
 import asyncio
 import math
@@ -13,7 +13,7 @@ class BAScraper:
         if config is None:
             config = BAConfig()
         self.logger = logging.getLogger(__name__)
-        self.timezone = config.timezone
+        self.config = config
         self.logger.debug('Init complete.')
 
     async def get(self, settings: Union[PullPushModel, ArcticShiftModel, dict]):
@@ -26,14 +26,20 @@ class BAScraper:
             case PullPushModel():
                 v_settings = settings
                 fetcher = PullPush(v_settings)
+
             case ArcticShiftModel():
                 v_settings = settings
                 fetcher = ArcticShift(v_settings)
-            case dict():  # service_type param needs to be added in the settings dict
-                try: 
+
+            case dict():
+                # service_type param needs to be added in the settings dict
+                # cannot determine model type without it.
+                try:
                     service_name = settings['service_type']
-                except: raise ValueError(
+                except KeyError:
+                    raise ValueError(
                     "`service_type` needs to exist to use dict input (to set the service type)")
+
                 match service_name:
                     case "PullPush":
                         v_settings = PullPushModel.model_validate(settings)
@@ -42,17 +48,22 @@ class BAScraper:
                         v_settings = ArcticShiftModel.model_validate(settings)
                         fetcher = ArcticShift(v_settings)
                     case _:
-                        raise ValueError("`service_type` needs to be either 'PullPush' or 'ArcticShift'")
+                        raise ValueError(
+                            "`service_type` needs to be either 'PullPush' or 'ArcticShift'")
             case _:
                 raise TypeError("Wrong setting type for `get`, " \
                 "needs to be one of PullPushModel, ArcticShiftModel or dict")
 
-        # time partitioned auto pagination
+        # time partitioned auto pagination trigger
         if v_settings.after and v_settings.before:
-            # after and before is validated/processed to be int but type checker still thinks it can be datetime
-            # so this part, though redundant, is needed.
-            assert isinstance(v_settings.after, int) and isinstance(v_settings.before, int)
-            
+            # `after` and `before` is validated/processed to be int(epoch)
+            # but type checker still thinks it can be datetime
+            # so this part, though redundant, is needed. (and also just in case)
+            assert (
+                isinstance(v_settings.after, int) and
+                isinstance(v_settings.before, int)
+            )
+
             # split-up time ranges into segments
             # after/before are inclusive for the API endpoints
             segment_duration = (v_settings.before - v_settings.after) / v_settings.no_coro
@@ -63,8 +74,8 @@ class BAScraper:
                 ]
                 for s in range(v_settings.no_coro)
             ]
-            self.logger.info(f'segments for coro: {segments}')
-            
+            self.logger.debug(f'segments for coro: {segments}')
+
             # clamping the final end time to be exactly `before`
             segments[-1][-1] = v_settings.before
 
@@ -72,6 +83,7 @@ class BAScraper:
 
             async with httpx.AsyncClient(http2=True) as client:
                 pass
-        
-        else:  # no time partitioned pagination, just single request to the endpoint
+
+        # no time partitioned pagination, just single request to the endpoint
+        else:
             pass

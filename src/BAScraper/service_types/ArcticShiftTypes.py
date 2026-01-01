@@ -11,6 +11,11 @@ from typing import (
     Callable
 )
 
+from datetime import datetime
+import logging
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from tzlocal import get_localzone
+
 from pydantic import (
     BaseModel,
     Field,
@@ -20,6 +25,16 @@ from pydantic import (
     StrictStr,
     field_validator,
     model_validator,
+)
+
+from BAScraper.utils import (
+    reddit_username_rule,
+    reddit_id_rule,
+    subreddit_name_rule,
+    localize_temporal_fields,
+    normalize_datetime_fields,
+    validate_temporal_order,
+    validate_temporal_value,
 )
 
 from pydantic_extra_types.pendulum_dt import DateTime
@@ -98,11 +113,8 @@ PostField = Union[_CommonField, _PostOnlyField]
 CommentField = Union[_CommonField, _CommentOnlyField]
 AllFields = Union[PostField, CommentField, SubredditField]
 
-TimeSeriesPrecision = Literal["year", "quarter", "month", "week", "day", "hour", "minute"]
-
-reddit_id_rule = r"^(?:t[1-6]_[0-9A-Za-z]{2,}|[0-9A-Za-z]+)$"
-reddit_username_rule = r"^(?:u/)?[A-Za-z0-9_-]{3,20}$"
-subreddit_name_rule = r"^(?:r/)?[A-Za-z0-9][A-Za-z0-9_]{1,20}$"
+TimeSeriesPrecision = Literal["year", "quarter", "month", "week",
+                              "day", "hour", "minute"]
 
 REDDIT_ID_RE = re.compile(reddit_id_rule)
 SUBREDDIT_RE = re.compile(subreddit_name_rule)
@@ -156,7 +168,7 @@ class ArcticShiftGroup:
     /api/comments/search
 
     /api/comments/tree
-    ``` 
+    ```
     so a possible `4*1 + 2*1 + 1*1 = 7` endpoints
     """
 
@@ -178,15 +190,39 @@ class ArcticShiftModel(BaseModel):
     """
 
     _BASE_URL: StrictStr = "https://arctic-shift.photon-reddit.com/api"
+    logger: ClassVar[logging.Logger] = logging.getLogger(__name__)
+
     service_type: StrictStr | None = None  # only used when passed in as dict (for identification)
+    timezone: StrictStr = Field(default=get_localzone().key,
+                                validate_default=True)
 
     endpoint: ArcticShiftEndpointTypes
     lookup: ArcticShiftLookupTypes
 
     no_coro: StrictInt = Field(default=3, gt=0)
     interval_sleep_ms: StrictInt = Field(default=500, ge=0)
+    cooldown_sleep_ms: StrictInt = Field(default=5000, ge=0)
     max_retries: int = Field(default=5, ge=0)
     backoff_factor: int | float = Field(default=1, ge=0)
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, v: str) -> str:
+        try:
+            ZoneInfo(v)
+            cls.logger.info(f"Timezone set as: {v}")
+        except ZoneInfoNotFoundError:
+            raise ValueError(f"Invalid timezone: {v}")
+        return v
+
+    @model_validator(mode="before")
+    @classmethod
+    def localize_temporal_fields(cls, data):
+        return localize_temporal_fields(
+            data,
+            cls._TEMPORAL_FIELDS,
+            cls.logger,
+        )
 
     ids: Annotated[
         List[Annotated[StrictStr, Field(pattern=reddit_id_rule)]] | StrictStr | None,
@@ -261,7 +297,7 @@ class ArcticShiftModel(BaseModel):
     ] = Field(default=None, min_length=1)
 
     after: Annotated[
-        DateTime | StrictInt | StrictStr | None,
+        DateTime | datetime | StrictInt | StrictStr | None,
         ArcticShiftGroup(
             [
                 (["posts", "comments"], ["search", "search/aggregate"]),
@@ -278,7 +314,7 @@ class ArcticShiftModel(BaseModel):
     ] = Field(default=None, union_mode="left_to_right")
 
     before: Annotated[
-        DateTime | StrictInt | StrictStr | None,
+        DateTime | datetime | StrictInt | StrictStr | None,
         ArcticShiftGroup(
             [
                 (["posts", "comments"], ["search", "search/aggregate"]),
@@ -571,7 +607,7 @@ class ArcticShiftModel(BaseModel):
     ] = Field(default=None, ge=0)
 
     active_since: Annotated[
-        DateTime | StrictInt | StrictStr | None,
+        DateTime | datetime | StrictInt | StrictStr | None,
         ArcticShiftGroup(
             [
                 (["users"], ["search"]),
@@ -684,10 +720,8 @@ class ArcticShiftModel(BaseModel):
 
     @field_validator(*_TEMPORAL_FIELDS, mode="after")
     @classmethod
-    def validate_temporal_value(cls, value: DateTime | int | str | None):
-        if isinstance(value, str):
-            raise ValueError("Value must be a valid datetime (ISO 8601) or integer timestamp (epoch)")
-        return value
+    def validate_temporal_value(cls, value: DateTime | datetime | int | str | None):
+        return validate_temporal_value(value)
 
     @model_validator(mode="after")
     def validate_lookup(self) -> Self:
@@ -830,26 +864,10 @@ class ArcticShiftModel(BaseModel):
         return ",".join(items)
 
     def _normalize_datetime_fields(self) -> None:
-        for attr in self._TEMPORAL_FIELDS:
-            value = getattr(self, attr)
-            if isinstance(value, DateTime):  # pass for int and None
-                setattr(self, attr, value.int_timestamp)
+        normalize_datetime_fields(self, self._TEMPORAL_FIELDS, self.timezone, self.logger)
 
     def _validate_temporal_order(self) -> None:
-        # after and before should be either None or int now
-        if isinstance(self.after, int) and isinstance(self.before, int):
-            if self.after >= self.before:
-                raise ValueError("'after' must be less than 'before'.")
-        elif self.after is not None and self.before is None:
-            warnings.warn("'after' is set but 'before' is not, " \
-            "BAScraper will not attempt to iterate and will only fetch a single page of results.", UserWarning)
-        elif self.after is None and isinstance(self.before, int):
-            warnings.warn("'before' is set but 'after' is not, " \
-            "BAScraper will not attempt to iterate and will only fetch a single page of results.", UserWarning)
-        else:  # both None
-            warnings.warn("'after' and 'before' are both None, " \
-            "BAScraper will not attempt to iterate and will only fetch a single page of results. "
-            "(limited to 100 entries)", UserWarning)
+        validate_temporal_order(self.after, self.before)
 
     def _validate_limit(self) -> None:
         if self.limit is None:
