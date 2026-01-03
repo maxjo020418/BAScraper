@@ -77,12 +77,21 @@ class BaseService(Generic[TSettings]):
                 await asyncio.sleep(int(ratelimit_reset))
                 self.rate_limit_clear.set()
                 raise self.RateLimitRetry()  # should trigger retry
+            case 422:
+                # ArcticShift occasionally returns 422 under load
+                self.logger.warning(
+                    "HTTP 422 from %s - retrying. Response body: %s",
+                    response.request.url,
+                    response.text[:1000],
+                )
+                raise self.RateLimitRetry()
             case _:
                 # not implemented for each error codes (4xx, 5xx)
                 ...
 
         assert "data" in response.json(), \
-            "Cannot find `data` in response json, malformed response?"
+            "Cannot find `data` in response json, maybe malformed response?" \
+                f"Response body: {response.text}"
 
         return response.raise_for_status()
 

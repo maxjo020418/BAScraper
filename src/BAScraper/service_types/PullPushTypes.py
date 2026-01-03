@@ -66,7 +66,7 @@ class PullPushModel(BaseModel):
     no_coro: StrictInt = Field(default=3, gt=0)  # number of coroutines
     interval_sleep_ms: StrictInt = Field(default=500, ge=0)
     cooldown_sleep_ms: StrictInt = Field(default=5000, ge=0)
-    max_retries: int = Field(default=5, ge=0)
+    max_retries: int = Field(default=10, ge=0)
     backoff_factor: int | float = Field(default=1, ge=0)
 
     @field_validator("timezone")

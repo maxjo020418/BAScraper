@@ -18,6 +18,10 @@ def parse_datetime_string(raw: str) -> datetime:
     return datetime.fromisoformat(raw_iso)
 
 
+def format_epoch_utc(epoch_utc: int) -> str:
+    return datetime.fromtimestamp(epoch_utc).strftime("%y%m%d-%H%M%S")
+
+
 def localize_temporal_fields(
     data: Any,
     temporal_fields: Tuple[str, ...],
@@ -87,9 +91,10 @@ def normalize_datetime_fields(
             epoch_utc = value.int_timestamp
             if not tz_is_utc(timezone):
                 logger.info(
-                    "Timezone conversion (%s): %r -> %d (to epoch UTC)",
+                    "Normalization to epoch UTC (%s): %r -> %s (%d)",
                     attr,
                     value,
+                    format_epoch_utc(epoch_utc),
                     epoch_utc,
                 )
             setattr(model, attr, epoch_utc)
@@ -108,9 +113,10 @@ def normalize_datetime_fields(
             epoch_utc = int(value.timestamp())
             if not tz_is_utc(timezone):
                 logger.info(
-                    "Timezone conversion (%s): %r -> %d (to epoch UTC)",
+                    "Normalization to epoch UTC (%s): %r -> %s (%d)",
                     attr,
                     value,
+                    format_epoch_utc(epoch_utc),
                     epoch_utc,
                 )
             setattr(model, attr, epoch_utc)

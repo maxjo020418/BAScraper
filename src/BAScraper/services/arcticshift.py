@@ -3,6 +3,8 @@ from BAScraper.service_types import ArcticShiftModel
 
 import tempfile
 import json
+import os
+import logging
 from typing import List
 from asyncio import Semaphore
 from httpx import AsyncClient, Client, Response
@@ -14,6 +16,7 @@ class ArcticShift(BaseService[ArcticShiftModel]):
                  settings: ArcticShiftModel,
                  connection_test_url: str | None = None) -> None:
         super().__init__(settings)
+        self.logger = logging.getLogger(__name__)
         self.connection_test_url = (
             "https://arctic-shift.photon-reddit.com/api/subreddits/rules?subreddits=help"
             if connection_test_url is None
@@ -38,6 +41,9 @@ class ArcticShift(BaseService[ArcticShiftModel]):
                 max_rate=response.headers.get("X-RateLimit-Reset"),
                 time_period=response.headers.get("X-RateLimit-Remaining")
             )
+            self.logger.info(f"Ratelimit initialized - "
+                             f"max rate: {self.async_limiter.max_rate} | "
+                             f"time period: {self.async_limiter.time_period}")
 
     async def _fetch_time_window(self,
                                  client: AsyncClient,
@@ -48,11 +54,13 @@ class ArcticShift(BaseService[ArcticShiftModel]):
 
         cursor = settings.before  # start point cursor
 
-        temp_file = tempfile.TemporaryFile(mode="w+", prefix="BAScraper_tempfile_")
-        self.logger.debug(f"temp file created as: {temp_file.name}")
+        temp_file = tempfile.NamedTemporaryFile(mode="w+", dir="./",
+                                                prefix="BAScraper_",
+                                                suffix="_tempfile.json",
+                                                delete=False)
+        self.logger.info(f"temp file created as: {temp_file.name}")
 
         data = list()
-
         # condition is not rly need in practice but just in case
         while cursor > settings.after:
             params = settings.model_dump(
@@ -74,8 +82,10 @@ class ArcticShift(BaseService[ArcticShiftModel]):
             resp_json: List[dict] = response.json()['data']
 
             result_count = len(resp_json)
-            self.logger.info(f"GET recieved - res-count: {result_count}, "
-                             f"cursor: {cursor}")
+            self.logger.info(f"GET Recieved: "
+                             f"res-count: {result_count} | cursor: {cursor} | "
+                             f"ratelimit-remaining: {response.headers.get("X-RateLimit-Remaining")} | "
+                             f"ratelimit-reset: {response.headers.get("X-RateLimit-Reset")}")
             if result_count <= 0:
                 break
 
@@ -83,9 +93,13 @@ class ArcticShift(BaseService[ArcticShiftModel]):
             data.append(resp_json)
             json.dump(resp_json, temp_file)
 
-        # won't be closed if it errors out
-        # should error out before this point
+        # tempfile won't be closed/ulinked if it errors out
+        # if it throws an exception, it should error out before this point (I think)
+        temp_file.flush()
         temp_file.close()
+        self.logger.info(f"cleaning up tempfile '{temp_file.name}'...")
+        os.unlink(temp_file.name)
+
         return data
 
     async def _fetch_once(self,
