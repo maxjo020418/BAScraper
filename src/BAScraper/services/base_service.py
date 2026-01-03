@@ -52,7 +52,7 @@ class BaseService(Generic[TSettings]):
             ))
         )
 
-    async def check_response(self, response: Response):
+    async def check_response(self, response: Response) -> Response:
         """
         tenacity retry will only trigger when err is raised,
         no err is raised for 429 ratelimit, so manual err raise is needed!
@@ -79,38 +79,37 @@ class BaseService(Generic[TSettings]):
                 raise self.RateLimitRetry()  # should trigger retry
             case _:
                 # not implemented for each error codes (4xx, 5xx)
-                # just raise err for now.
-                response.raise_for_status()
+                ...
 
         assert "data" in response.json(), \
             "Cannot find `data` in response json, malformed response?"
+
+        return response.raise_for_status()
 
 
     ### wrappers for the actual function (to include the retry function) ###
 
     async def fetch_time_window(self,
                                 client: AsyncClient,
-                                semaphore: Semaphore,
                                 settings: TSettings):
-        return self.service_retry(self._fetch_time_window)(client, semaphore, settings)
+        return await self.service_retry(self._fetch_time_window)(client, settings)
 
     async def fetch_once(self,
                          client: AsyncClient,
                          settings: TSettings):
-        return self.service_retry(self._fetch_once)(client, settings)
+        return await self.service_retry(self._fetch_once)(client, settings)
 
     async def fetch_post_comments(self,
                                   client: AsyncClient,
                                   semaphore: Semaphore,
                                   settings: TSettings):
-        return self.service_retry(self._fetch_post_comments)(client, semaphore, settings)
+        return await self.service_retry(self._fetch_post_comments)(client, semaphore, settings)
 
 
     ### actual logics for requesting ###
 
     async def _fetch_time_window(self,
                                  client: AsyncClient,
-                                 semaphore: Semaphore,
                                  settings: TSettings):
         raise NotImplementedError('Not for direct use')
 

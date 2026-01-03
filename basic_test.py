@@ -8,33 +8,34 @@ import datetime
 import pendulum
 
 import logging
+import asyncio
 
 def main():
     # !! config(validation run) needs to be run before model validation if you want logs
     # !! because logging config is done within BAConfig model validation (init.)
     conf = BAConfig(
-            log_level=logging.DEBUG,
+            # log_level=logging.DEBUG,
             log_file_path="bascraper.log",
             log_file_mode="w",
         )
     try:
-        example = ArcticShiftModel(
-            endpoint="comments",
+        example1 = ArcticShiftModel(
+            endpoint="posts",
             lookup="search",
             # ids=["123123","23we"],
-            # subreddit="r/python",
-            after="2023-01-01",
-            before="2023-10-26T15:30:00Z",
+            subreddit="r/umamusume",
+            after="2025-10-25",
+            before="2025-10-26T15:30:00Z",
             # sort="asc",
             # limit=50,
             # title="release",
             fields=["id", "title", "created_utc"],
         )
-        print(example.model_dump_json(indent=4, exclude_none=True))
+        print(example1.model_dump_json(indent=4, exclude_none=True))
 
         print(f"\n{30*"="}\n")
 
-        example = PullPushModel(
+        example2 = PullPushModel(
             endpoint="comment",
             q='"test phrase"',
             ids=['abc123', 'def456'],
@@ -46,12 +47,13 @@ def main():
             after=datetime.datetime(2025, 1, 1), # "2023-01-01",
             before=pendulum.datetime(2026, 10, 2), #"2026-10-26T15:30:00Z",
         )
-        print(example.model_dump_json(indent=4, exclude_none=True))
+        print(example2.model_dump_json(indent=4, exclude_none=True))
 
     except Exception as e:
         raise(e)
 
     bas = BAScraper(conf)
+    asyncio.run(bas.get(example1))
 
 
 if __name__ == "__main__":

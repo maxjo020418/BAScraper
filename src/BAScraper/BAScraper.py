@@ -55,6 +55,9 @@ class BAScraper:
                 "needs to be one of PullPushModel, ArcticShiftModel or dict")
 
         # time partitioned auto pagination trigger
+        # TODO:
+        #   if time partition is enabled,
+        #   `created_utc` return param shout NOT BE EXCLUDED
         if v_settings.after and v_settings.before:
             # `after` and `before` is validated/processed to be int(epoch)
             # but type checker still thinks it can be datetime
@@ -79,16 +82,31 @@ class BAScraper:
             # clamping the final end time to be exactly `before`
             segments[-1][-1] = v_settings.before
 
-            semaphore = asyncio.Semaphore(v_settings.no_coro)
+            # semaphore = asyncio.Semaphore(v_settings.no_coro)
 
-            async with httpx.AsyncClient(http2=True) as client:
+            async with httpx.AsyncClient(http2=True) as client, asyncio.TaskGroup() as tg:
                 match (fetcher, v_settings):
                     case (PullPush(), PullPushModel()):
-                        await fetcher._fetch_time_window(client, semaphore, v_settings)
+                        for segment in segments:
+                            self.logger.info(f"PullPush worker for {segment} created")
+                            v_settings_temp_P = v_settings.model_copy()
+                            v_settings_temp_P.after, v_settings_temp_P.before = segment
+                            tg.create_task(
+                                fetcher.fetch_time_window(
+                                    client, v_settings_temp_P
+                                )
+                            )
                     case (ArcticShift(), ArcticShiftModel()):
-                        await fetcher._fetch_time_window(client, semaphore, v_settings)
+                        for segment in segments:
+                            v_settings_temp_A = v_settings.model_copy()
+                            v_settings_temp_A.after, v_settings_temp_A.before = segment
+                            tg.create_task(
+                                fetcher.fetch_time_window(
+                                    client, v_settings_temp_A
+                                )
+                            )
                     case _:
-                        raise TypeError("Fetcher/settings mismatch")
+                        raise TypeError("fetcher(service) & settings mismatch")
 
         # no time partitioned pagination, just single request to the endpoint
         else:

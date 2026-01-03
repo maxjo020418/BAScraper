@@ -189,7 +189,7 @@ class ArcticShiftModel(BaseModel):
     Pydantic model describing all supported Arctic Shift API parameters.
     """
 
-    _BASE_URL: StrictStr = "https://arctic-shift.photon-reddit.com/api"
+    _BASE_URL: StrictStr = "https://arctic-shift.photon-reddit.com/api/"
     logger: ClassVar[logging.Logger] = logging.getLogger(__name__)
 
     service_type: StrictStr | None = None  # only used when passed in as dict (for identification)
@@ -344,7 +344,7 @@ class ArcticShiftModel(BaseModel):
                 ),
             ]
         ),
-    ] = Field(default=None)
+    ] = Field(default=100)
 
     sort: Annotated[
         Literal["asc", "desc"] | None,
