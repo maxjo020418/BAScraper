@@ -3,6 +3,7 @@ import httpx
 from httpx import AsyncClient, Response
 import logging
 import asyncio
+from typing import Generic, TypeVar
 from tenacity import (
     retry,
     wait_random_exponential,
@@ -13,7 +14,9 @@ from tenacity import (
 
 from BAScraper.service_types import ArcticShiftModel, PullPushModel
 
-class BaseService:
+TSettings = TypeVar("TSettings", PullPushModel, ArcticShiftModel)
+
+class BaseService(Generic[TSettings]):
     # you CAN use `exclude=True` for the model fields,
     # but there for conveneince reasons and because-
     # `ClassVar` doesn't allow `Field` to be used this is needed/used
@@ -27,7 +30,7 @@ class BaseService:
         """Raised to manually trigger the tenacity retry loop."""
         pass
 
-    def __init__(self, settings: PullPushModel | ArcticShiftModel) -> None:
+    def __init__(self, settings: TSettings) -> None:
         self.logger = logging.getLogger(__name__)
         self.lock = Lock()
 
@@ -88,18 +91,18 @@ class BaseService:
     async def fetch_time_window(self,
                                 client: AsyncClient,
                                 semaphore: Semaphore,
-                                settings: PullPushModel | ArcticShiftModel):
+                                settings: TSettings):
         return self.service_retry(self._fetch_time_window)(client, semaphore, settings)
 
     async def fetch_once(self,
                          client: AsyncClient,
-                         settings: PullPushModel | ArcticShiftModel):
+                         settings: TSettings):
         return self.service_retry(self._fetch_once)(client, settings)
 
     async def fetch_post_comments(self,
                                   client: AsyncClient,
                                   semaphore: Semaphore,
-                                  settings: PullPushModel | ArcticShiftModel):
+                                  settings: TSettings):
         return self.service_retry(self._fetch_post_comments)(client, semaphore, settings)
 
 
@@ -108,18 +111,18 @@ class BaseService:
     async def _fetch_time_window(self,
                                  client: AsyncClient,
                                  semaphore: Semaphore,
-                                 settings):
+                                 settings: TSettings):
         raise NotImplementedError('Not for direct use')
 
     async def _fetch_once(self,
                           client: AsyncClient,
-                          settings):
+                          settings: TSettings):
         raise NotImplementedError('Not for direct use')
 
     async def _fetch_post_comments(self,
                                    client: AsyncClient,
                                    semaphore: Semaphore,
-                                   settings):
+                                   settings: TSettings):
         raise NotImplementedError('Not for direct use')
 
 

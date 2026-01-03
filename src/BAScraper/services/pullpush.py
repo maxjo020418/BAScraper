@@ -4,7 +4,7 @@ from BAScraper.service_types import PullPushModel
 from asyncio import Semaphore
 from httpx import AsyncClient
 
-class PullPush(BaseService):
+class PullPush(BaseService[PullPushModel]):
     def __init__(self, settings: PullPushModel) -> None:
         super().__init__(settings)
 

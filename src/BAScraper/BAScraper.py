@@ -82,7 +82,13 @@ class BAScraper:
             semaphore = asyncio.Semaphore(v_settings.no_coro)
 
             async with httpx.AsyncClient(http2=True) as client:
-                pass
+                match (fetcher, v_settings):
+                    case (PullPush(), PullPushModel()):
+                        await fetcher._fetch_time_window(client, semaphore, v_settings)
+                    case (ArcticShift(), ArcticShiftModel()):
+                        await fetcher._fetch_time_window(client, semaphore, v_settings)
+                    case _:
+                        raise TypeError("Fetcher/settings mismatch")
 
         # no time partitioned pagination, just single request to the endpoint
         else:

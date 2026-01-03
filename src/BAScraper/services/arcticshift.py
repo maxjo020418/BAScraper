@@ -7,7 +7,7 @@ from httpx import AsyncClient, Client, Response
 from urllib.parse import urljoin
 from aiolimiter import AsyncLimiter
 
-class ArcticShift(BaseService):
+class ArcticShift(BaseService[ArcticShiftModel]):
     def __init__(self,
                  settings: ArcticShiftModel,
                  connection_test_url: str | None = None) -> None:
@@ -38,9 +38,9 @@ class ArcticShift(BaseService):
             )
 
     async def _fetch_time_window(self,
-                           client: AsyncClient,
-                           semaphore: Semaphore,
-                           settings: ArcticShiftModel) -> None:
+                                 client: AsyncClient,
+                                 semaphore: Semaphore,
+                                 settings: ArcticShiftModel) -> None:
         async with semaphore:
             # for type checker suppression (both are converted to (utc) int in the Model)
             assert isinstance(settings.after, int) and isinstance(settings.before, int)
