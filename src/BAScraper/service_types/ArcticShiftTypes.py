@@ -723,6 +723,22 @@ class ArcticShiftModel(BaseModel):
     def validate_temporal_value(cls, value: DateTime | datetime | int | str | None):
         return validate_temporal_value(value)
 
+    @field_validator("fields", mode="after")
+    @classmethod
+    def validate_fields(cls, value: List[AllFields] | StrictStr):
+        # `id` and `created_utc` must be included to index/paginate
+        if isinstance(value, str):
+            value_temp: List[str] = [value]
+        elif isinstance(value, list):
+            value_temp = value.copy() # type: ignore
+
+        if 'created_utc' not in value:
+            value_temp.append('created_utc')
+        if 'id' not in value:
+            value_temp.append('id')
+
+        return value_temp
+
     @model_validator(mode="after")
     def validate_lookup(self) -> Self:
         allowed = self._ALLOWED_LOOKUPS[self.endpoint]

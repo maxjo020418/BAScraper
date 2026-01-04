@@ -3,7 +3,7 @@ import httpx
 from httpx import AsyncClient, Response
 import logging
 import asyncio
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, List, Tuple
 from tenacity import (
     retry,
     wait_random_exponential,
@@ -40,16 +40,17 @@ class BaseService(Generic[TSettings]):
         self.rate_limit_clear = Event()
         self.rate_limit_clear.set()  # `.set()` if it's okay to proceed
 
+        self.retryable_exception = (
+            httpx.NetworkError,
+            httpx.TimeoutException,
+            self.RateLimitRetry
+        )
         self.service_retry = retry(  # retry decorator func.
             wait=wait_random_exponential(multiplier=settings.backoff_factor,
                                          min=1, max=10),
             stop=stop_after_attempt(settings.max_retries),
             before_sleep=before_sleep_log(self.logger, logging.WARNING),
-            retry=retry_if_exception_type((
-                httpx.NetworkError,
-                httpx.TimeoutException,
-                self.RateLimitRetry
-            ))
+            retry=retry_if_exception_type(self.retryable_exception)
         )
 
     async def check_response(self, response: Response) -> Response:
@@ -100,8 +101,9 @@ class BaseService(Generic[TSettings]):
 
     async def fetch_time_window(self,
                                 client: AsyncClient,
-                                settings: TSettings):
-        return await self.service_retry(self._fetch_time_window)(client, settings)
+                                settings: TSettings,
+                                worker_id: int):
+        return await self.service_retry(self._fetch_time_window)(client, settings, worker_id)
 
     async def fetch_once(self,
                          client: AsyncClient,
@@ -119,18 +121,19 @@ class BaseService(Generic[TSettings]):
 
     async def _fetch_time_window(self,
                                  client: AsyncClient,
-                                 settings: TSettings):
+                                 settings: TSettings,
+                                 worker_id: int) -> List[dict]:
         raise NotImplementedError('Not for direct use')
 
     async def _fetch_once(self,
                           client: AsyncClient,
-                          settings: TSettings):
+                          settings: TSettings) -> List[dict] | Tuple[List[dict], int]:
         raise NotImplementedError('Not for direct use')
 
     async def _fetch_post_comments(self,
                                    client: AsyncClient,
                                    semaphore: Semaphore,
-                                   settings: TSettings):
+                                   settings: TSettings) -> List[dict]:
         raise NotImplementedError('Not for direct use')
 
 

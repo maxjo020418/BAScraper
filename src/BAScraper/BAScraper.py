@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, List
 import httpx
 import asyncio
 import math
@@ -16,7 +16,7 @@ class BAScraper:
         self.config = config
         self.logger.debug('Init complete.')
 
-    async def get(self, settings: Union[PullPushModel, ArcticShiftModel, dict]):
+    async def get(self, settings: Union[PullPushModel, ArcticShiftModel, dict]) -> dict:
 
         v_settings: PullPushModel | ArcticShiftModel
         fetcher: PullPush | ArcticShift
@@ -55,9 +55,6 @@ class BAScraper:
                 "needs to be one of PullPushModel, ArcticShiftModel or dict")
 
         # time partitioned auto pagination trigger
-        # TODO:
-        #   if time partition is enabled,
-        #   `created_utc` return param shout NOT BE EXCLUDED
         if v_settings.after and v_settings.before:
             # `after` and `before` is validated/processed to be int(epoch)
             # but type checker still thinks it can be datetime
@@ -83,31 +80,41 @@ class BAScraper:
             segments[-1][-1] = v_settings.before
 
             # semaphore = asyncio.Semaphore(v_settings.no_coro)
+            tasks: List[asyncio.Task] = []
 
             async with httpx.AsyncClient(http2=True) as client, asyncio.TaskGroup() as tg:
                 match (fetcher, v_settings):
                     case (PullPush(), PullPushModel()):
-                        for segment in segments:
-                            self.logger.info(f"PullPush worker for {segment} created")
-                            v_settings_temp_P = v_settings.model_copy()
+                        for i, segment in enumerate(segments):
+                            v_settings_temp_P: PullPushModel = v_settings.model_copy()
                             v_settings_temp_P.after, v_settings_temp_P.before = segment
-                            tg.create_task(
+                            tasks.append(tg.create_task(
                                 fetcher.fetch_time_window(
-                                    client, v_settings_temp_P
+                                    client, v_settings_temp_P, i
                                 )
-                            )
+                            ))
+                            self.logger.info(f"PullPush worker-{i} for {segment} created")
                     case (ArcticShift(), ArcticShiftModel()):
-                        for segment in segments:
-                            v_settings_temp_A = v_settings.model_copy()
+                        for i, segment in enumerate(segments):
+                            v_settings_temp_A: ArcticShiftModel = v_settings.model_copy()
                             v_settings_temp_A.after, v_settings_temp_A.before = segment
-                            tg.create_task(
+                            tasks.append(tg.create_task(
                                 fetcher.fetch_time_window(
-                                    client, v_settings_temp_A
+                                    client, v_settings_temp_A, i
                                 )
-                            )
+                            ))
+                            self.logger.info(f"ArcticShift worker-{i} for {segment} created")
                     case _:
                         raise TypeError("fetcher(service) & settings mismatch")
 
+            tasks.reverse()  # segment is in reverse order
+            results_temp = list()
+            for task in tasks:
+                results_temp += task.result()
+            results = {task.pop('id') : task for task in results_temp}
+
+            return results
+
         # no time partitioned pagination, just single request to the endpoint
         else:
-            pass
+            raise NotImplementedError
