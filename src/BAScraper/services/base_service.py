@@ -3,7 +3,13 @@ import httpx
 from httpx import AsyncClient, Response
 import logging
 import asyncio
-from typing import Generic, TypeVar, List, Tuple
+from typing import (
+    Generic,
+    TypeVar,
+    List,
+    Tuple,
+    Literal,
+    overload)
 from tenacity import (
     retry,
     wait_random_exponential,
@@ -102,12 +108,12 @@ class BaseService(Generic[TSettings]):
     async def fetch_time_window(self,
                                 client: AsyncClient,
                                 settings: TSettings,
-                                worker_id: int):
+                                worker_id: int) -> List[dict]:
         return await self.service_retry(self._fetch_time_window)(client, settings, worker_id)
 
     async def fetch_once(self,
                          client: AsyncClient,
-                         settings: TSettings):
+                         settings: TSettings) -> List[dict]:
         return await self.service_retry(self._fetch_once)(client, settings)
 
     async def fetch_post_comments(self,
@@ -125,9 +131,25 @@ class BaseService(Generic[TSettings]):
                                  worker_id: int) -> List[dict]:
         raise NotImplementedError('Not for direct use')
 
+    @overload
     async def _fetch_once(self,
                           client: AsyncClient,
-                          settings: TSettings) -> List[dict] | Tuple[List[dict], int]:
+                          settings: TSettings,
+                          return_count: Literal[False] = False,
+                          ) -> List[dict]: ...
+
+    @overload
+    async def _fetch_once(self,
+                          client: AsyncClient,
+                          settings: TSettings,
+                          return_count: Literal[True],
+                          ) -> Tuple[List[dict], int]: ...
+
+    async def _fetch_once(self,
+                          client: AsyncClient,
+                          settings: TSettings,
+                          return_count: bool = False,  # only used by `_fetch_time_window`
+                          ) -> List[dict] | Tuple[List[dict], int]:
         raise NotImplementedError('Not for direct use')
 
     async def _fetch_post_comments(self,

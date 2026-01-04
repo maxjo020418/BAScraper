@@ -1,11 +1,11 @@
-from typing import Union, List
+from typing import Union, List, Tuple, TypeVar
 import httpx
 import asyncio
 import math
 import logging
 
 from BAScraper.service_types import PullPushModel, ArcticShiftModel
-from BAScraper.services import PullPush, ArcticShift
+from BAScraper.services import PullPush, ArcticShift, BaseService, TSettings
 from BAScraper.utils import BAConfig
 
 class BAScraper:
@@ -18,41 +18,7 @@ class BAScraper:
 
     async def get(self, settings: Union[PullPushModel, ArcticShiftModel, dict]) -> dict:
 
-        v_settings: PullPushModel | ArcticShiftModel
-        fetcher: PullPush | ArcticShift
-
-        # https://peps.python.org/pep-0636/#adding-a-ui-matching-objects
-        match settings:
-            case PullPushModel():
-                v_settings = settings
-                fetcher = PullPush(v_settings)
-
-            case ArcticShiftModel():
-                v_settings = settings
-                fetcher = ArcticShift(v_settings)
-
-            case dict():
-                # service_type param needs to be added in the settings dict
-                # cannot determine model type without it.
-                try:
-                    service_name = settings['service_type']
-                except KeyError:
-                    raise ValueError(
-                    "`service_type` needs to exist to use dict input (to set the service type)")
-
-                match service_name:
-                    case "PullPush":
-                        v_settings = PullPushModel.model_validate(settings)
-                        fetcher = PullPush(v_settings)
-                    case "ArcticShift":
-                        v_settings = ArcticShiftModel.model_validate(settings)
-                        fetcher = ArcticShift(v_settings)
-                    case _:
-                        raise ValueError(
-                            "`service_type` needs to be either 'PullPush' or 'ArcticShift'")
-            case _:
-                raise TypeError("Wrong setting type for `get`, " \
-                "needs to be one of PullPushModel, ArcticShiftModel or dict")
+        v_settings, fetcher = self._match_settings(settings)
 
         # time partitioned auto pagination trigger
         if v_settings.after and v_settings.before:
@@ -111,10 +77,57 @@ class BAScraper:
             results_temp = list()
             for task in tasks:
                 results_temp += task.result()
-            results = {task.pop('id') : task for task in results_temp}
 
-            return results
+            return {ent.pop('id') : ent for ent in results_temp}
 
         # no time partitioned pagination, just single request to the endpoint
         else:
-            raise NotImplementedError
+            v_settings, fetcher = self._match_settings(settings)
+            single_result: List[dict]
+            async with httpx.AsyncClient(http2=True) as client:
+                match (fetcher, v_settings):
+                    case (PullPush(), PullPushModel()):
+                        single_result = await fetcher.fetch_once(client, v_settings)
+                    case (ArcticShift(), ArcticShiftModel()):
+                        single_result = await fetcher.fetch_once(client, v_settings)
+                    case _:
+                        raise TypeError("fetcher(service) & settings mismatch")
+
+            return {ent.pop('id') : ent for ent in single_result}
+
+    def _match_settings(self, settings: Union[PullPushModel, ArcticShiftModel, dict]
+                        ) -> Tuple[PullPushModel | ArcticShiftModel, PullPush | ArcticShift]:
+        v_settings: PullPushModel | ArcticShiftModel
+        fetcher: PullPush | ArcticShift
+        # https://peps.python.org/pep-0636/#adding-a-ui-matching-objects
+        match settings:
+            case PullPushModel():
+                return settings, PullPush(settings)
+
+            case ArcticShiftModel():
+                return settings, ArcticShift(settings)
+
+            case dict():
+                # service_type param needs to be added in the settings dict
+                # cannot determine model type without it.
+                try:
+                    service_name = settings['service_type']
+                except KeyError:
+                    raise ValueError(
+                    "`service_type` needs to exist to use dict input (to set the service type)")
+
+                match service_name:
+                    case "PullPush":
+                        v_settings = PullPushModel.model_validate(settings)
+                        fetcher = PullPush(v_settings)
+                        return v_settings, fetcher
+                    case "ArcticShift":
+                        v_settings = ArcticShiftModel.model_validate(settings)
+                        fetcher = ArcticShift(v_settings)
+                        return v_settings, fetcher
+                    case _:
+                        raise ValueError(
+                            "`service_type` needs to be either 'PullPush' or 'ArcticShift'")
+            case _:
+                raise TypeError("Wrong setting type for `get`, " \
+                "needs to be one of PullPushModel, ArcticShiftModel or dict")
