@@ -7,7 +7,6 @@ from BAScraper.utils import BAConfig
 import datetime
 import pendulum
 
-import logging
 import asyncio
 import json
 

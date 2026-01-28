@@ -20,7 +20,7 @@ class ArcticShift(BaseService[ArcticShiftModel]):
         super().__init__(settings)
         self.logger = logging.getLogger(__name__)
         self.async_limiter: AsyncLimiter | None = None
-        # TODO: expose granular control paramters (no hardcode)
+        # TODO: expose granular control paramters (no hardcoded params)
         self.limiter = AdaptiveRateLimiter(safety_margin=1)
 
     async def _fetch_time_window(self,
@@ -34,7 +34,7 @@ class ArcticShift(BaseService[ArcticShiftModel]):
             os.unlink(temp_file.name)
 
         # for type checker suppression
-        # (both are already converted to (utc) int in the Model)
+        # both are already converted to (utc) int in the Model but IDE complains...
         assert isinstance(settings.after, int) and isinstance(settings.before, int)
 
         cursor = settings.before  # start point cursor
@@ -82,14 +82,15 @@ class ArcticShift(BaseService[ArcticShiftModel]):
             _cleanup(temp_file)
             return data
 
-    @overload
+    # https://peps.python.org/pep-0484/#function-method-overloading
+    @overload  # for static type checking
     async def _fetch_once(self,
                           client: AsyncClient,
                           settings: ArcticShiftModel,
                           return_count: Literal[False] = False,
                           ) -> List[dict]: ...
 
-    @overload
+    @overload  # for static type checking
     async def _fetch_once(self,
                           client: AsyncClient,
                           settings: ArcticShiftModel,
@@ -99,8 +100,13 @@ class ArcticShift(BaseService[ArcticShiftModel]):
     async def _fetch_once(self,
                           client: AsyncClient,
                           settings: ArcticShiftModel,
-                          return_count: bool = False,  # only used by `_fetch_time_window`
+                          return_count: bool = False,
                           ) -> List[dict] | Tuple[List[dict], int]:
+        # !! `return_count=True` is only used by `_fetch_time_window` !!
+        # return_count returns the "count of posts/comments"
+        # used for time window fetching which needs this to
+        # determine fetch termination for time-blocks
+
         params = settings.model_dump(
             exclude=self.NOT_REQUEST_PARAMETER,
             exclude_none=True
@@ -113,7 +119,7 @@ class ArcticShift(BaseService[ArcticShiftModel]):
         response = await client.get(url=url, params=params)
         response = await self.check_response(response)
 
-        # already asserted that 'data' is there
+        # already asserted that 'data' key exists
         resp_json: List[dict] = response.json()['data']
         ratelimit_remaining = response.headers.get("X-RateLimit-Remaining")
         ratelimit_reset = response.headers.get("X-RateLimit-Reset")

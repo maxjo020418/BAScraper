@@ -1,14 +1,16 @@
-from typing import Union, List, Tuple, TypeVar
+from typing import Union, List, Tuple
 import httpx
 import asyncio
 import math
 import logging
 
 from BAScraper.service_types import PullPushModel, ArcticShiftModel
-from BAScraper.services import PullPush, ArcticShift, BaseService, TSettings
+from BAScraper.services import PullPush, ArcticShift
 from BAScraper.utils import BAConfig
 
 class BAScraper:
+    # Note that `v_settings` mean "verified/validated settings"
+    # which went through custom validations and pydantic validations
     def __init__(self, config: BAConfig | None = None):
         if config is None:
             config = BAConfig()
@@ -31,7 +33,7 @@ class BAScraper:
             )
 
             # split-up time ranges into segments
-            # after/before are inclusive for the API endpoints
+            # !! after/before are inclusive for the API endpoints !!
             segment_duration = (v_settings.before - v_settings.after) / v_settings.no_coro
             segments = [
                 [
@@ -45,7 +47,6 @@ class BAScraper:
             # clamping the final end time to be exactly `before`
             segments[-1][-1] = v_settings.before
 
-            # semaphore = asyncio.Semaphore(v_settings.no_coro)
             tasks: List[asyncio.Task] = []
 
             async with httpx.AsyncClient(http2=True) as client, asyncio.TaskGroup() as tg:
@@ -73,11 +74,12 @@ class BAScraper:
                     case _:
                         raise TypeError("fetcher(service) & settings mismatch")
 
-            tasks.reverse()  # segment is in reverse order
+            tasks.reverse()  # segments are in reverse order (set to "new -> old")
             results_temp = list()
             for task in tasks:
                 results_temp += task.result()
 
+            # indexing: base36 id as key and json data as val
             return {ent.pop('id') : ent for ent in results_temp}
 
         # no time partitioned pagination, just single request to the endpoint
@@ -95,10 +97,13 @@ class BAScraper:
 
             return {ent.pop('id') : ent for ent in single_result}
 
-    def _match_settings(self, settings: Union[PullPushModel, ArcticShiftModel, dict]
-                        ) -> Tuple[PullPushModel | ArcticShiftModel, PullPush | ArcticShift]:
+    def _match_settings(
+            self, settings: Union[PullPushModel, ArcticShiftModel, dict]
+        ) -> Tuple[PullPushModel | ArcticShiftModel, PullPush | ArcticShift]:
+
         v_settings: PullPushModel | ArcticShiftModel
         fetcher: PullPush | ArcticShift
+
         # https://peps.python.org/pep-0636/#adding-a-ui-matching-objects
         match settings:
             case PullPushModel():

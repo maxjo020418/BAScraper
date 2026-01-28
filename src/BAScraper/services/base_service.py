@@ -23,13 +23,16 @@ from BAScraper.service_types import ArcticShiftModel, PullPushModel
 TSettings = TypeVar("TSettings", PullPushModel, ArcticShiftModel)
 
 class BaseService(Generic[TSettings]):
-    # you CAN use `exclude=True` for the model fields,
-    # but there for conveneince reasons and because-
-    # `ClassVar` doesn't allow `Field` to be used this is needed/used
+    # instead of this NOT_REQUEST_PARAMETER,
+    # you CAN use `exclude=True` when feeding/using the fields
+    # but `ClassVar` doesn't allow `Field` to be used
+    # hence why this method is used to manually filter out later
     NOT_REQUEST_PARAMETER = {
+        # common `xxTypes`
         "_BASE_URL", "service_type", "endpoint", "lookup", "no_coro", "timezone",
         "interval_sleep_ms", "cooldown_sleep_ms", "max_retries", "backoff_factor",
-        "_ALLOWED_LOOKUPS", "_TEMPORAL_FIELDS"  # only for `ArcticShiftTypes`
+        # for `ArcticShiftTypes`
+        "_ALLOWED_LOOKUPS", "_TEMPORAL_FIELDS"
     }
 
     class RateLimitRetry(Exception):
@@ -61,14 +64,14 @@ class BaseService(Generic[TSettings]):
 
     async def check_response(self, response: Response) -> Response:
         """
-        tenacity retry will only trigger when err is raised,
-        no err is raised for 429 ratelimit, so manual err raise is needed!
+        tenacity's retry will only trigger when exception is raised,
+        no exception is raised for 429 ratelimit somehow,
+        so manual "raise exception" is needed! (RateLimitRetry will be raised)
+        (thundering herd will be prevented via wait_random_exponential)
 
-        RateLimitRetry is still raised to trigger tenacity retry
-        (to prevent thundering herds via wait_random_exponential)
-
-        For ArcticShift `X-RateLimit-Reset` is used for cooldown,
-        default is waiting for cooldown_sleep_ms(5s default).
+        For ArcticShift, `X-RateLimit-Reset` is used for cooldown,
+        default cooldown time (for ratelimit events) is waiting for
+        cooldown_sleep_ms (5000ms default, adjustable).
         """
         match response.status_code:
             case 429:
@@ -80,12 +83,15 @@ class BaseService(Generic[TSettings]):
                     f"Ratelimit reset/cooldown time: {ratelimit_reset}\n"
                     "Sleeping until ratelimit cooldown..."
                 )
-                # TODO: check if this is safe? can't rly test in normal env.
+                # TODO:
+                #   check if this is safe? Never tested if this actually works
+                #   as in never hit the ratelimit_reset reliably
                 await asyncio.sleep(int(ratelimit_reset))
                 self.rate_limit_clear.set()
                 raise self.RateLimitRetry()  # should trigger retry
             case 422:
-                # ArcticShift occasionally returns 422 under load
+                # ArcticShift occasionally returns 422 for some reason
+                # (retrying works for some reason...)
                 self.logger.warning(
                     "HTTP 422 from %s - retrying. Response body: %s",
                     response.request.url,
@@ -94,6 +100,7 @@ class BaseService(Generic[TSettings]):
                 raise self.RateLimitRetry()
             case _:
                 # not implemented for each error codes (4xx, 5xx)
+                # just throw exception for now
                 ...
 
         assert "data" in response.json(), \
