@@ -10,7 +10,7 @@ from BAScraper.utils import BAConfig
 
 class BAScraper:
     # Note that `v_settings` mean "verified/validated settings"
-    # which went through custom validations and pydantic validations
+    # which went through custom validations and/or `.model_validate`
     def __init__(self, config: BAConfig | None = None):
         if config is None:
             config = BAConfig()

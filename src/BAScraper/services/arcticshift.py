@@ -9,7 +9,6 @@ import logging
 from tenacity import RetryError
 from math import ceil
 from typing import List, Tuple, Literal, overload
-from asyncio import Semaphore
 from httpx import AsyncClient
 from urllib.parse import urljoin
 from aiolimiter import AsyncLimiter
@@ -124,8 +123,9 @@ class ArcticShift(BaseService[ArcticShiftModel]):
         ratelimit_remaining = response.headers.get("X-RateLimit-Remaining")
         ratelimit_reset = response.headers.get("X-RateLimit-Reset")
 
-        if ratelimit_remaining is not None and ratelimit_reset is not None:
-            await self.limiter.update(ratelimit_remaining, ratelimit_reset)
+        assert ratelimit_remaining is not None and ratelimit_reset is not None, \
+            'X-RateLimit header was expected from response, but not found!'
+        await self.limiter.update(ratelimit_remaining, ratelimit_reset)
 
         result_count = len(resp_json)
         self.logger.info(f"GET Recieved: "
@@ -136,7 +136,12 @@ class ArcticShift(BaseService[ArcticShiftModel]):
         return resp_json if not return_count else (resp_json, result_count)
 
     async def _fetch_post_comments(self,
-                                   client:AsyncClient,
-                                   semaphore: Semaphore,
+                                   client: AsyncClient,
                                    settings: ArcticShiftModel) -> List[dict]:
-        raise NotImplementedError('Not for direct use')
+        # would be triggered when fetch_post_comments exists, but still...
+        assert settings.fetch_post_comments, \
+            '`fetch_post_comments` needs to be set properly for it to fetch comments.'
+
+        raise NotImplementedError()
+        # TODO: 어떻게 ID 회수를 해서 fetching을 해야하나?
+

@@ -127,7 +127,7 @@ class BaseService(Generic[TSettings]):
                                   client: AsyncClient,
                                   semaphore: Semaphore,
                                   settings: TSettings):
-        return await self.service_retry(self._fetch_post_comments)(client, semaphore, settings)
+        return await self.service_retry(self._fetch_post_comments)(client, settings)
 
 
     ### actual logics for requesting ###
@@ -161,7 +161,6 @@ class BaseService(Generic[TSettings]):
 
     async def _fetch_post_comments(self,
                                    client: AsyncClient,
-                                   semaphore: Semaphore,
                                    settings: TSettings) -> List[dict]:
         raise NotImplementedError('Not for direct use')
 

@@ -8,9 +8,8 @@ class AdaptiveRateLimiter:
       ratelimit-remaining (tokens left)
       ratelimit-reset     (seconds until refill/reset)
 
-    Strategy:
-      1) Token gate: never allow more than locally-tracked remaining tokens before reset.
-      2) Pacing: also apply a smooth AsyncLimiter to spread requests out.
+      Token gate: never allow more than locally-tracked remaining tokens before reset.
+      Pacing: also apply a smooth AsyncLimiter to spread requests out.
     """
     def __init__(self, *, safety_margin: int = 1, max_pace_period: float = 60.0):
         self._lock = asyncio.Lock()

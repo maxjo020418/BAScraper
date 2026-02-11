@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import (
     Annotated,
     ClassVar,
@@ -36,10 +38,10 @@ from BAScraper.utils import (
     validate_temporal_order,
     validate_temporal_value,
 )
+from BAScraper.service_types.PullPushTypes import PullPushModel
 
 from pydantic_extra_types.pendulum_dt import DateTime
 import re
-import warnings
 
 ArcticShiftEndpointTypes = Literal[
     "posts",
@@ -130,44 +132,44 @@ class ArcticShiftGroup:
 
     Note:
     ArcticShiftGroup metadata structure is
-    ```
-    List[
-        Tuple[
-            List[endpoints: ArcticShiftEndpointTypes],
-            List[lookups: ArcticShiftLookupTypes]
+    ```python
+        List[
+            Tuple[
+                List[endpoints: ArcticShiftEndpointTypes],
+                List[lookups: ArcticShiftLookupTypes]
+            ]
         ]
-    ]
     ```
     each tuple in the list is the possible combinations of endpoints and lookups that the field is valid for.
     (is used for URI endpoint construction)
 
     example use in `ArcticShiftModel`:
     ```python
-    md2html: Annotated[
-        StrictBool | None,
-        ArcticShiftGroup(
-            [
-                (["posts", "comments", "subreddits", "users"], ["ids"]),
-                (["posts", "comments"], ["search"]),
-                (["comments"], ["tree"]),
-            ]
-        ),
-    ] = Field(default=None)
+        md2html: Annotated[
+            StrictBool | None,
+            ArcticShiftGroup(
+                [
+                    (["posts", "comments", "subreddits", "users"], ["ids"]),
+                    (["posts", "comments"], ["search"]),
+                    (["comments"], ["tree"]),
+                ]
+            ),
+        ] = Field(default=None)
     ```
     can be interpreted as:
 
     parameter `md2html` is type `StrictBool | None` with default val of `None`,
     and is used/valid on the following endpoints:
     ```
-    /api/posts/ids
-    /api/comments/ids
-    /api/subreddits/ids
-    /api/users/ids
+        /api/posts/ids
+        /api/comments/ids
+        /api/subreddits/ids
+        /api/users/ids
 
-    /api/posts/search
-    /api/comments/search
+        /api/posts/search
+        /api/comments/search
 
-    /api/comments/tree
+        /api/comments/tree
     ```
     so a possible `4*1 + 2*1 + 1*1 = 7` endpoints
     """
@@ -205,6 +207,21 @@ class ArcticShiftModel(BaseModel):
     max_retries: int = Field(default=10, ge=0)
     backoff_factor: int | float = Field(default=1, ge=0)
 
+    # default val None won't fetch comments under post
+    # if a service Model is set, it'll use that setting/model to fetch comments
+    fetch_post_comments: ArcticShiftModel | PullPushModel | None = Field(default=None)
+
+    @field_validator("fetch_post_comments")
+    @classmethod
+    def validate_fetch_post_comments_model(
+        cls, v: ArcticShiftModel | PullPushModel | None):
+        if v is None:
+            return v
+        assert v.endpoint == "comment" or v.endpoint == "comments", \
+            "`fetch_post_comments` field is used for fetching comments, " \
+            f"set the `endpoint` field to fetch comments, not as `{v.endpoint}`"
+        return v
+
     @field_validator("timezone")
     @classmethod
     def validate_timezone(cls, v: str) -> str:
@@ -223,6 +240,8 @@ class ArcticShiftModel(BaseModel):
             cls._TEMPORAL_FIELDS,
             cls.logger,
         )
+
+    ## OPTIONAL API FIELDS ##
 
     ids: Annotated[
         List[Annotated[StrictStr, Field(pattern=reddit_id_rule)]] | StrictStr | None,
