@@ -36,6 +36,8 @@ from BAScraper.utils import (
     validate_temporal_value,
 )
 
+ServiceType = Literal["PullPush"]
+
 PullPushEndpointTypes = Literal['submission', 'comment']
 
 class PullPushGroup:
@@ -57,13 +59,13 @@ class PullPushModel(BaseModel):
     _BASE_URL: StrictStr = "https://api.pullpush.io/reddit/search"
     logger: ClassVar[logging.Logger] = logging.getLogger(__name__)
 
-    service_type: StrictStr | None = None  # only used when passed in as dict (for identification)
+    service_type: ServiceType | None = None  # only used when passed in as dict (for identification)
     timezone: StrictStr = Field(default=get_localzone().key,
                                 validate_default=True)
 
     endpoint: PullPushEndpointTypes
 
-    no_coro: StrictInt = Field(default=3, gt=0)  # number of coroutines
+    no_workers: StrictInt = Field(default=3, gt=0)  # number of coroutines
     interval_sleep_ms: StrictInt = Field(default=500, ge=0)
     cooldown_sleep_ms: StrictInt = Field(default=5000, ge=0)
     max_retries: int = Field(default=10, ge=0)

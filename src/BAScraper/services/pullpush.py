@@ -1,8 +1,8 @@
 from BAScraper.services import BaseService
 from BAScraper.service_types import PullPushModel
 
-from asyncio import Semaphore
-from typing import List
+from asyncio import Queue
+from typing import List, Literal, Tuple, overload
 from httpx import AsyncClient
 
 class PullPush(BaseService[PullPushModel]):
@@ -11,17 +11,33 @@ class PullPush(BaseService[PullPushModel]):
 
     async def _fetch_time_window(self,
                                  client: AsyncClient,
-                                 settings: PullPushModel) -> List[dict]:
-        raise NotImplementedError('Not done yet')
+                                 settings: PullPushModel,
+                                 worker_id: int) -> List[dict]:
+        raise NotImplementedError('Not for direct use')
+
+    @overload
+    async def _fetch_once(self,
+                          client: AsyncClient,
+                          settings: PullPushModel,
+                          return_count: Literal[False] = False,
+                          ) -> List[dict]: ...
+
+    @overload
+    async def _fetch_once(self,
+                          client: AsyncClient,
+                          settings: PullPushModel,
+                          return_count: Literal[True],
+                          ) -> Tuple[List[dict], int]: ...
 
     async def _fetch_once(self,
                           client: AsyncClient,
                           settings: PullPushModel,
-                          return_count: bool = False) -> List[dict]:
-        raise NotImplementedError('Not done yet')
+                          return_count: bool = False,  # only used by `_fetch_time_window`
+                          ) -> List[dict] | Tuple[List[dict], int]:
+        raise NotImplementedError('Not for direct use')
 
     async def _fetch_post_comments(self,
                                    client: AsyncClient,
-                                   semaphore: Semaphore,
-                                   settings: PullPushModel) -> List[dict]:
-        raise NotImplementedError('Not done yet')
+                                   settings: PullPushModel,
+                                   ids: Queue[str]) -> List[dict]:
+        raise NotImplementedError('Not for direct use')

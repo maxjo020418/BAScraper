@@ -20,6 +20,7 @@ def main():
         )
 
     example1 = ArcticShiftModel(
+        no_workers=3,
         interval_sleep_ms=250,
         endpoint="posts",
         lookup="search",

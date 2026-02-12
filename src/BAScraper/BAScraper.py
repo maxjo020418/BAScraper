@@ -34,13 +34,13 @@ class BAScraper:
 
             # split-up time ranges into segments
             # !! after/before are inclusive for the API endpoints !!
-            segment_duration = (v_settings.before - v_settings.after) / v_settings.no_coro
+            segment_duration = (v_settings.before - v_settings.after) / v_settings.no_workers
             segments = [
                 [
                     math.ceil(v_settings.after + s * segment_duration),
                     math.ceil((v_settings.after + (s + 1) * segment_duration)) - 1
                 ]
-                for s in range(v_settings.no_coro)
+                for s in range(v_settings.no_workers)
             ]
             self.logger.debug(f'segments for coro: {segments}')
 

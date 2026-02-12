@@ -43,6 +43,8 @@ from BAScraper.service_types.PullPushTypes import PullPushModel
 from pydantic_extra_types.pendulum_dt import DateTime
 import re
 
+ServiceType = Literal["ArcticShift"]
+
 ArcticShiftEndpointTypes = Literal[
     "posts",
     "comments",
@@ -191,36 +193,29 @@ class ArcticShiftModel(BaseModel):
     Pydantic model describing all supported Arctic Shift API parameters.
     """
 
-    _BASE_URL: StrictStr = "https://arctic-shift.photon-reddit.com/api/"
+    _BASE_URL: ClassVar[StrictStr] = "https://arctic-shift.photon-reddit.com/api/"
+
     logger: ClassVar[logging.Logger] = logging.getLogger(__name__)
 
-    service_type: StrictStr | None = None  # only used when passed in as dict (for identification)
+    # only used when passed in as dict (for identification)
+    service_type: ServiceType | None = Field(default=None, exclude=True)
+
     timezone: StrictStr = Field(default=get_localzone().key,
-                                validate_default=True)
-
-    endpoint: ArcticShiftEndpointTypes
-    lookup: ArcticShiftLookupTypes
-
-    no_coro: StrictInt = Field(default=3, gt=0)
-    interval_sleep_ms: StrictInt = Field(default=500, ge=0)
-    cooldown_sleep_ms: StrictInt = Field(default=5000, ge=0)
-    max_retries: int = Field(default=10, ge=0)
-    backoff_factor: int | float = Field(default=1, ge=0)
+                                validate_default=True, exclude=True)
+    no_workers: StrictInt = Field(default=3, gt=0, exclude=True)
+    interval_sleep_ms: StrictInt = Field(default=500, ge=0, exclude=True)
+    cooldown_sleep_ms: StrictInt = Field(default=5000, ge=0, exclude=True)
+    max_retries: int = Field(default=10, ge=0, exclude=True)
+    backoff_factor: int | float = Field(default=1, ge=0, exclude=True)
 
     # default val None won't fetch comments under post
     # if a service Model is set, it'll use that setting/model to fetch comments
-    fetch_post_comments: ArcticShiftModel | PullPushModel | None = Field(default=None)
+    fetch_post_comments: bool = Field(default=False, exclude=True)
+    # used for `fetch_post_comments`
+    no_sub_comment_workers: StrictInt = Field(default=3, gt=0, exclude=True)
 
-    @field_validator("fetch_post_comments")
-    @classmethod
-    def validate_fetch_post_comments_model(
-        cls, v: ArcticShiftModel | PullPushModel | None):
-        if v is None:
-            return v
-        assert v.endpoint == "comment" or v.endpoint == "comments", \
-            "`fetch_post_comments` field is used for fetching comments, " \
-            f"set the `endpoint` field to fetch comments, not as `{v.endpoint}`"
-        return v
+    endpoint: ArcticShiftEndpointTypes = Field(exclude=True)
+    lookup: ArcticShiftLookupTypes = Field(exclude=True)
 
     @field_validator("timezone")
     @classmethod

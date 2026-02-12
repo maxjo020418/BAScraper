@@ -4,82 +4,21 @@ from BAScraper.utils import AdaptiveRateLimiter
 
 import tempfile
 import json
-import os
 import logging
 from tenacity import RetryError
 from math import ceil
 from typing import List, Tuple, Literal, overload
 from httpx import AsyncClient
 from urllib.parse import urljoin
-from aiolimiter import AsyncLimiter
+from asyncio import Queue
 
 class ArcticShift(BaseService[ArcticShiftModel]):
     def __init__(self,
                  settings: ArcticShiftModel) -> None:
         super().__init__(settings)
         self.logger = logging.getLogger(__name__)
-        self.async_limiter: AsyncLimiter | None = None
         # TODO: expose granular control paramters (no hardcoded params)
         self.limiter = AdaptiveRateLimiter(safety_margin=1)
-
-    async def _fetch_time_window(self,
-                                 client: AsyncClient,
-                                 settings: ArcticShiftModel,
-                                 worker_id: int = -1) -> List[dict]:
-        def _cleanup(temp_file):
-            temp_file.flush()
-            temp_file.close()
-            self.logger.info(f"cleaning up tempfile '{temp_file.name}'...")
-            os.unlink(temp_file.name)
-
-        # for type checker suppression
-        # both are already converted to (utc) int in the Model but IDE complains...
-        assert isinstance(settings.after, int) and isinstance(settings.before, int)
-
-        cursor = settings.before  # start point cursor
-        start_time = settings.before
-
-        temp_file = tempfile.NamedTemporaryFile(mode="w+", dir="./",
-                                                prefix="BAScraper_",
-                                                suffix="_tempfile.json",
-                                                delete=False)
-        self.logger.info(f"temp file created as: {temp_file.name}")
-
-        data: List[dict] = list()
-        try:
-            # condition is not rly need in practice but just in case
-            while cursor > settings.after:
-                settings.before = cursor
-                resp_json, result_count = await self._fetch_once(client, settings, True)
-
-                if result_count <= 0:
-                    break
-
-                cursor = int(resp_json[-1]['created_utc'])
-                data += resp_json
-                json.dump(resp_json, temp_file)
-
-                self.logger.info(f"worker-{worker_id} progress: "
-                                f"{ceil((start_time-cursor)/(start_time-settings.after)*100)}%")
-
-        except self.retryable_exception as err:
-            # perform cleanup to prevent tempfile accumulating between retries
-            _cleanup(temp_file)
-            raise err  # passed to tencity to attempt retry
-
-        except RetryError as err:
-            # tempfile will not be closed (for progress recovery if needed)
-            self.logger.error(f"worker-{worker_id} Maximum retry reached! Aborting...\n{err}")
-            return data
-
-        except KeyboardInterrupt:
-            # tempfile will not be closed (for progress recovery if needed)
-            self.logger.error(f"worker-{worker_id} Has been cancelled!")
-            return data
-
-        else:
-            _cleanup(temp_file)
-            return data
 
     # https://peps.python.org/pep-0484/#function-method-overloading
     @overload  # for static type checking
@@ -106,17 +45,14 @@ class ArcticShift(BaseService[ArcticShiftModel]):
         # used for time window fetching which needs this to
         # determine fetch termination for time-blocks
 
-        params = settings.model_dump(
-            exclude=self.NOT_REQUEST_PARAMETER,
-            exclude_none=True
-        )
+        params = settings.model_dump(exclude_none=True)
         url = urljoin(
             settings._BASE_URL, f"{settings.endpoint}/{settings.lookup}"
         )
 
         await self.limiter.acquire()
         response = await client.get(url=url, params=params)
-        response = await self.check_response(response)
+        response = await self.response_code_handler(response)
 
         # already asserted that 'data' key exists
         resp_json: List[dict] = response.json()['data']
@@ -135,13 +71,95 @@ class ArcticShift(BaseService[ArcticShiftModel]):
 
         return resp_json if not return_count else (resp_json, result_count)
 
+    async def _fetch_time_window(self,
+                                 client: AsyncClient,
+                                 settings: ArcticShiftModel,
+                                 worker_id: int = -1) -> List[dict]:
+        # for type checker suppression
+        # both are already converted to (utc) int in the Model but IDE complains...
+        assert isinstance(settings.after, int) and isinstance(settings.before, int)
+
+        cursor: int = settings.before  # start point cursor
+        start_time: int = settings.before
+        end_time: int = settings.after
+        temp_file = self.create_tempfile("_tempfile.json")
+        data: List[dict] = list()
+
+        async def operation() -> List[dict]:
+            nonlocal cursor, data
+            # condition is not rly need in practice but just in case to prevent inf loop
+            while cursor > end_time:
+                settings.before = cursor
+                resp_json, result_count = await self._fetch_once(client, settings, True)
+
+                if result_count <= 0:
+                    break
+
+                cursor = int(resp_json[-1]['created_utc'])
+                data += resp_json
+                # TODO: simple json.dump results in invalid json,
+                # either concat as jsonl or use proper parsing
+                json.dump(resp_json, temp_file)
+
+                self.logger.info(f"worker-{worker_id} progress: "
+                                f"{ceil((start_time-cursor)/(start_time-end_time)*100)}%")
+
+            self.cleanup_tempfile(temp_file)
+            return data
+
+        async def on_retryable(err: BaseException):
+            # perform cleanup to prevent tempfile accumulating between retries
+            self.cleanup_tempfile(temp_file)
+            raise err  # passed to tencity to attempt retry
+
+        async def on_terminal_retryable(err: BaseException):
+            # !! tenacity.RetryError is when retry options are exhausted !!
+            self.logger.error(
+                f"worker-{worker_id} Maximum retry reached! Aborting...\n{err}")
+            return data  # tempfile will not be closed
+
+        async def on_cancel(_: BaseException):
+            self.logger.error(f"worker-{worker_id} Has been cancelled!")
+            return data  # tempfile will not be closed
+
+        return await self.response_exception_handler(
+            op=operation,
+            on_retryable=on_retryable,
+            on_terminal_retryable=on_terminal_retryable,
+            on_cancel=on_cancel
+        )
+
     async def _fetch_post_comments(self,
                                    client: AsyncClient,
-                                   settings: ArcticShiftModel) -> List[dict]:
-        # would be triggered when fetch_post_comments exists, but still...
-        assert settings.fetch_post_comments, \
-            '`fetch_post_comments` needs to be set properly for it to fetch comments.'
+                                   settings: ArcticShiftModel,
+                                   ids: Queue[str]) -> List[dict]:
+        results = list()
+        temp_file = self.create_tempfile("_comments_tempfile.json")
 
-        raise NotImplementedError()
-        # TODO: 어떻게 ID 회수를 해서 fetching을 해야하나?
+        while True:
+            id = ids.get()
+            try:
+                if id == '<END>':
+                    return results
+                assert isinstance(id, str)
+                result = await self._fetch_once(
+                    client,
+                    ArcticShiftModel(
+                        endpoint='comments',
+                        lookup='tree',
+                        no_workers=settings.no_sub_comment_workers,
 
+                        limit=25000,  # max limit, fetch all
+                        link_id=id,
+
+                        timezone=settings.timezone,
+                        interval_sleep_ms=settings.interval_sleep_ms,
+                        cooldown_sleep_ms=settings.cooldown_sleep_ms,
+                        max_retries=settings.max_retries,
+                        backoff_factor=settings.backoff_factor,
+                    )
+                )
+                json.dump(result, temp_file)
+                results += result
+            finally:
+                ids.task_done()

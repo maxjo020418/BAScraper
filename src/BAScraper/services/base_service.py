@@ -1,40 +1,34 @@
-from asyncio import Semaphore, Event, Lock
+from asyncio import Event, Lock, Queue
+import asyncio
 import httpx
 from httpx import AsyncClient, Response
 import logging
-import asyncio
+import tempfile
+import os
 from typing import (
     Generic,
     TypeVar,
     List,
     Tuple,
     Literal,
+    Callable,
+    Awaitable,
     overload)
 from tenacity import (
     retry,
     wait_random_exponential,
     stop_after_attempt,
     before_sleep_log,
-    retry_if_exception_type
+    retry_if_exception_type,
+    RetryError
 )
 
 from BAScraper.service_types import ArcticShiftModel, PullPushModel
 
 TSettings = TypeVar("TSettings", PullPushModel, ArcticShiftModel)
+T = TypeVar('T')
 
 class BaseService(Generic[TSettings]):
-    # instead of this NOT_REQUEST_PARAMETER,
-    # you CAN use `exclude=True` when feeding/using the fields
-    # but `ClassVar` doesn't allow `Field` to be used
-    # hence why this method is used to manually filter out later
-    NOT_REQUEST_PARAMETER = {
-        # common `xxTypes`
-        "_BASE_URL", "service_type", "endpoint", "lookup", "no_coro", "timezone",
-        "interval_sleep_ms", "cooldown_sleep_ms", "max_retries", "backoff_factor",
-        # for `ArcticShiftTypes`
-        "_ALLOWED_LOOKUPS", "_TEMPORAL_FIELDS"
-    }
-
     class RateLimitRetry(Exception):
         """Raised to manually trigger the tenacity retry loop."""
         pass
@@ -62,8 +56,10 @@ class BaseService(Generic[TSettings]):
             retry=retry_if_exception_type(self.retryable_exception)
         )
 
-    async def check_response(self, response: Response) -> Response:
+    async def response_code_handler(self, response: Response) -> Response:
         """
+        will check the response code and raise appropriate exceptions.
+
         tenacity's retry will only trigger when exception is raised,
         no exception is raised for 429 ratelimit somehow,
         so manual "raise exception" is needed! (RateLimitRetry will be raised)
@@ -77,7 +73,7 @@ class BaseService(Generic[TSettings]):
             case 429:
                 self.rate_limit_clear.clear()  # stop all async jobs
                 ratelimit_reset = \
-                    response.headers.get("X-RateLimit-Reset", self.cooldown_sleep_ms)
+                    int(response.headers.get("X-RateLimit-Reset", self.cooldown_sleep_ms))
                 self.logger.warning(
                     "Rate limit reached!\n"
                     f"Ratelimit reset/cooldown time: {ratelimit_reset}\n"
@@ -85,8 +81,8 @@ class BaseService(Generic[TSettings]):
                 )
                 # TODO:
                 #   check if this is safe? Never tested if this actually works
-                #   as in never hit the ratelimit_reset reliably
-                await asyncio.sleep(int(ratelimit_reset))
+                #   as in: I've never hit the ratelimit_reset reliably
+                await asyncio.sleep(ratelimit_reset)
                 self.rate_limit_clear.set()
                 raise self.RateLimitRetry()  # should trigger retry
             case 422:
@@ -97,7 +93,7 @@ class BaseService(Generic[TSettings]):
                     response.request.url,
                     response.text[:1000],
                 )
-                raise self.RateLimitRetry()
+                raise self.RateLimitRetry()  # should trigger retry
             case _:
                 # not implemented for each error codes (4xx, 5xx)
                 # just throw exception for now
@@ -109,6 +105,42 @@ class BaseService(Generic[TSettings]):
 
         return response.raise_for_status()
 
+    async def response_exception_handler(
+            self, *,
+            op: Callable[[], Awaitable[T]],
+            on_retryable: Callable[[BaseException], Awaitable[T]],
+            on_terminal_retryable: Callable[[BaseException], Awaitable[T]],
+            on_cancel: Callable[[BaseException], Awaitable[T]],
+        ) -> T:
+        '''
+        unified try/except/else block for reqeust handling, handles common exceptions.
+        use with `response_code_handler` to get appropriate exception thrown inside `op`
+        '''
+        try:
+            return await op()
+
+        except self.retryable_exception as err:
+            return await on_retryable(err)
+
+        except RetryError as err:
+            return await on_terminal_retryable(err)
+
+        except KeyboardInterrupt as err:
+            return await on_cancel(err)
+
+    def create_tempfile(self, file_suffix: str, dir: str = "./") -> tempfile._TemporaryFileWrapper:
+        temp_file = tempfile.NamedTemporaryFile(mode="w+", dir=dir,
+                                                prefix="BAScraper_",
+                                                suffix=file_suffix,
+                                                delete=False)
+        self.logger.info(f"temp file created as: {temp_file.name}")
+        return temp_file
+
+    def cleanup_tempfile(self, temp_file: tempfile._TemporaryFileWrapper):
+            temp_file.flush()
+            temp_file.close()
+            self.logger.info(f"cleaning up tempfile '{temp_file.name}'...")
+            os.unlink(temp_file.name)
 
     ### wrappers for the actual function (to include the retry function) ###
 
@@ -122,13 +154,6 @@ class BaseService(Generic[TSettings]):
                          client: AsyncClient,
                          settings: TSettings) -> List[dict]:
         return await self.service_retry(self._fetch_once)(client, settings)
-
-    async def fetch_post_comments(self,
-                                  client: AsyncClient,
-                                  semaphore: Semaphore,
-                                  settings: TSettings):
-        return await self.service_retry(self._fetch_post_comments)(client, settings)
-
 
     ### actual logics for requesting ###
 
@@ -161,7 +186,8 @@ class BaseService(Generic[TSettings]):
 
     async def _fetch_post_comments(self,
                                    client: AsyncClient,
-                                   settings: TSettings) -> List[dict]:
+                                   settings: TSettings,
+                                   ids: Queue[str]) -> List[dict]:
         raise NotImplementedError('Not for direct use')
 
 
