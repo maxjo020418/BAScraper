@@ -1,0 +1,45 @@
+[project]
+name = "BAScraper"
+version = "0.3.0"
+description = "Async API wrapper for PullPush.io and Arctic-Shift Reddit datasets."
+readme = "README.md"
+authors = [
+    { name = "maxjo020418", email = "maxjo020418@gmail.com" }
+]
+license = { file = "LICENSE" }
+keywords = ["reddit", "scraper", "pullpush", "arctic-shift", "async"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.12"
+dependencies = [
+    "aiolimiter>=1.2.1",
+    "httpx[http2]>=0.28.1",
+    "pydantic>=2.11.10",
+    "pydantic-extra-types[pendulum]>=2.10.5",
+    "tenacity>=9.1.2",
+    "tzlocal>=5.3.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/maxjo020418/BAScraper"
+Repository = "https://github.com/maxjo020418/BAScraper"
+Issues = "https://github.com/maxjo020418/BAScraper/issues"
+
+[build-system]
+requires = ["uv_build>=0.8.23,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = ["BAScraper"]
+module-root = "src"
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "ASYNC"]
