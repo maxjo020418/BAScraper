@@ -728,7 +728,9 @@ class ArcticShiftModel(BaseModel):
         if isinstance(value, str):
             if not len(value):  # empty str
                 return value
-            assert REDDIT_ID_RE.fullmatch(value)
+            if not REDDIT_ID_RE.fullmatch(value):
+                raise ValueError("ID fields must be base36 Reddit IDs (no type prefix).")
+            return value
         else:  # when None
             return value
 

@@ -111,6 +111,7 @@ class BaseService(Generic[TSettings]):
             on_retryable: Callable[[BaseException], Awaitable[T]],
             on_terminal_retryable: Callable[[BaseException], Awaitable[T]],
             on_cancel: Callable[[BaseException], Awaitable[T]],
+            on_final: Callable[[], Awaitable[None]]
         ) -> T:
         '''
         unified try/except/else block for reqeust handling, handles common exceptions.
@@ -127,6 +128,9 @@ class BaseService(Generic[TSettings]):
 
         except KeyboardInterrupt as err:
             return await on_cancel(err)
+
+        finally:
+            await on_final()
 
     def create_tempfile(self, file_suffix: str, dir: str = "./") -> tempfile._TemporaryFileWrapper:
         temp_file = tempfile.NamedTemporaryFile(mode="w+", dir=dir,
@@ -147,26 +151,32 @@ class BaseService(Generic[TSettings]):
     async def fetch_time_window(self,
                                 client: AsyncClient,
                                 settings: TSettings,
+                                link_ids: Queue[str],
                                 worker_id: int) -> List[dict]:
-        return await self.service_retry(self._fetch_time_window)(client, settings, worker_id)
+        return await self.service_retry \
+            (self._fetch_time_window)(client, settings, link_ids, worker_id)
 
     async def fetch_once(self,
                          client: AsyncClient,
-                         settings: TSettings) -> List[dict]:
-        return await self.service_retry(self._fetch_once)(client, settings)
+                         settings: TSettings,
+                         link_ids: Queue[str]) -> List[dict]:
+        return await self.service_retry(self._fetch_once)(client, settings, link_ids)
+
+    async def fetch_post_comments(self,
+                                  client: AsyncClient,
+                                  settings: TSettings,
+                                  link_ids: Queue[str],
+                                  worker_id: int = -1) -> List[dict]:
+        return await self.service_retry \
+            (self._fetch_post_comments)(client, settings, link_ids, worker_id)
 
     ### actual logics for requesting ###
-
-    async def _fetch_time_window(self,
-                                 client: AsyncClient,
-                                 settings: TSettings,
-                                 worker_id: int) -> List[dict]:
-        raise NotImplementedError('Not for direct use')
 
     @overload
     async def _fetch_once(self,
                           client: AsyncClient,
                           settings: TSettings,
+                          link_ids: Queue[str],
                           return_count: Literal[False] = False,
                           ) -> List[dict]: ...
 
@@ -174,20 +184,30 @@ class BaseService(Generic[TSettings]):
     async def _fetch_once(self,
                           client: AsyncClient,
                           settings: TSettings,
+                          link_ids: Queue[str],
                           return_count: Literal[True],
                           ) -> Tuple[List[dict], int]: ...
 
     async def _fetch_once(self,
                           client: AsyncClient,
                           settings: TSettings,
+                          link_ids: Queue[str],
                           return_count: bool = False,  # only used by `_fetch_time_window`
                           ) -> List[dict] | Tuple[List[dict], int]:
+        raise NotImplementedError('Not for direct use')
+
+    async def _fetch_time_window(self,
+                                 client: AsyncClient,
+                                 settings: TSettings,
+                                 link_ids: Queue[str],
+                                 worker_id: int) -> List[dict]:
         raise NotImplementedError('Not for direct use')
 
     async def _fetch_post_comments(self,
                                    client: AsyncClient,
                                    settings: TSettings,
-                                   ids: Queue[str]) -> List[dict]:
+                                   link_ids: Queue[str],
+                                   worker_id: int = -1) -> List[dict]:
         raise NotImplementedError('Not for direct use')
 
 

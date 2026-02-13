@@ -21,17 +21,19 @@ def main():
 
     example1 = ArcticShiftModel(
         no_workers=3,
+        no_sub_comment_workers=10,
         interval_sleep_ms=250,
         endpoint="posts",
         lookup="search",
         # ids=["123123","23we"],
         subreddit="r/umamusume",
         after="2025-10-25",
-        before="2025-10-30T15:30:00Z",
+        before="2025-10-26T15:30:00Z",
         # sort="asc",
         # limit=50,
         # title="release",
         fields=["title", "link_flair_text"],
+        fetch_post_comments=True
     )
     print(example1.model_dump_json(indent=4, exclude_none=True))
 

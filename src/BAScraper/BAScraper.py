@@ -1,4 +1,4 @@
-from typing import Union, List, Tuple
+from typing import Union, List, Tuple, overload, Dict
 import httpx
 import asyncio
 import math
@@ -7,6 +7,8 @@ import logging
 from BAScraper.service_types import PullPushModel, ArcticShiftModel
 from BAScraper.services import PullPush, ArcticShift
 from BAScraper.utils import BAConfig
+
+END = '<END>'
 
 class BAScraper:
     # Note that `v_settings` mean "verified/validated settings"
@@ -21,6 +23,10 @@ class BAScraper:
     async def get(self, settings: Union[PullPushModel, ArcticShiftModel, dict]) -> dict:
 
         v_settings, fetcher = self._match_settings(settings)
+
+        # will only be used when settings.fetch_post_comments is true,
+        # still needed regardless of use cause function interface needs this
+        link_id_queue: asyncio.Queue[str] = asyncio.Queue()
 
         # time partitioned auto pagination trigger
         if v_settings.after and v_settings.before:
@@ -47,55 +53,164 @@ class BAScraper:
             # clamping the final end time to be exactly `before`
             segments[-1][-1] = v_settings.before
 
-            tasks: List[asyncio.Task] = []
+            tasks: Dict[str, List[asyncio.Task[List[dict]]]] = {
+                'submissions': [],
+                'comment_trees': []  # for comment fetching from submissions
+            }
 
-            async with httpx.AsyncClient(http2=True) as client, asyncio.TaskGroup() as tg:
-                match (fetcher, v_settings):
-                    case (PullPush(), PullPushModel()):
-                        for i, segment in enumerate(segments):
-                            v_settings_temp_P: PullPushModel = v_settings.model_copy()
-                            v_settings_temp_P.after, v_settings_temp_P.before = segment
-                            tasks.append(tg.create_task(
-                                fetcher.fetch_time_window(
-                                    client, v_settings_temp_P, i
-                                )
-                            ))
-                            self.logger.info(f"PullPush worker-{i} for {segment} created")
-                    case (ArcticShift(), ArcticShiftModel()):
-                        for i, segment in enumerate(segments):
-                            v_settings_temp_A: ArcticShiftModel = v_settings.model_copy()
-                            v_settings_temp_A.after, v_settings_temp_A.before = segment
-                            tasks.append(tg.create_task(
-                                fetcher.fetch_time_window(
-                                    client, v_settings_temp_A, i
-                                )
-                            ))
-                            self.logger.info(f"ArcticShift worker-{i} for {segment} created")
-                    case _:
-                        raise TypeError("fetcher(service) & settings mismatch")
+            async with httpx.AsyncClient(http2=True) as client, \
+                       asyncio.TaskGroup() as tg:
 
-            tasks.reverse()  # segments are in reverse order (set to "new -> old")
-            results_temp = list()
-            for task in tasks:
-                results_temp += task.result()
+                if isinstance(fetcher, PullPush):
+                    assert isinstance(v_settings, PullPushModel)
+                    self._schedule_workers(
+                        tg=tg,
+                        tasks=tasks,
+                        client=client,
+                        fetcher=fetcher,
+                        settings=v_settings,
+                        segments=segments,
+                        link_ids=link_id_queue
+                    )
+                elif isinstance(fetcher, ArcticShift):
+                    assert isinstance(v_settings, ArcticShiftModel)
+                    self._schedule_workers(
+                        tg=tg,
+                        tasks=tasks,
+                        client=client,
+                        fetcher=fetcher,
+                        settings=v_settings,
+                        segments=segments,
+                        link_ids=link_id_queue
+                    )
+                else:
+                    raise TypeError("fetcher(service) & settings mismatch")
+
+                if v_settings.fetch_post_comments:\
+                    # wait for producer completion
+                    await asyncio.gather(*tasks['submissions'])
+                    for _ in range(v_settings.no_sub_comment_workers):
+                        await link_id_queue.put(END)
+
+            # segments are in reverse order (set to "new -> old")
+            tasks['submissions'].reverse()
+
+            submission_results: List[dict] = list()
+            for task in tasks['submissions']:
+                submission_results += task.result()
 
             # indexing: base36 id as key and json data as val
-            return {ent.pop('id') : ent for ent in results_temp}
+            inexed_submission_results: Dict[str, dict] = \
+                {ent.pop('id') : ent for ent in submission_results}
+
+            # add comment to submission results if flag enabled
+            if v_settings.fetch_post_comments:
+
+                for elem in inexed_submission_results.values():
+                    elem['comments'] = list()
+
+                for task in tasks['comment_trees']:
+                    if len(comment_tree := task.result()):  # empty results may exist
+                        # link_id is same for all comment result within the same tree
+                        # [3:] is to remove the "t3_xxx" prefix for the link_id
+                        link_id = comment_tree[0]['data']['link_id'][3:]
+                        inexed_submission_results[link_id]['comments'] = comment_tree
+
+            return inexed_submission_results
 
         # no time partitioned pagination, just single request to the endpoint
         else:
-            v_settings, fetcher = self._match_settings(settings)
             single_result: List[dict]
             async with httpx.AsyncClient(http2=True) as client:
-                match (fetcher, v_settings):
-                    case (PullPush(), PullPushModel()):
-                        single_result = await fetcher.fetch_once(client, v_settings)
-                    case (ArcticShift(), ArcticShiftModel()):
-                        single_result = await fetcher.fetch_once(client, v_settings)
-                    case _:
-                        raise TypeError("fetcher(service) & settings mismatch")
+                if isinstance(fetcher, PullPush):
+                    assert isinstance(v_settings, PullPushModel)
+                    single_result = \
+                        await fetcher.fetch_once(client, v_settings, link_id_queue)
+                elif isinstance(fetcher, ArcticShift):
+                    assert isinstance(v_settings, ArcticShiftModel)
+                    single_result = \
+                        await fetcher.fetch_once(client, v_settings, link_id_queue)
+                else:
+                    raise TypeError("fetcher(service) & settings mismatch")
 
             return {ent.pop('id') : ent for ent in single_result}
+
+    @overload
+    def _schedule_workers(
+        self,
+        tg: asyncio.TaskGroup,
+        tasks: Dict[str, List[asyncio.Task[list]]],
+        client: httpx.AsyncClient,
+        fetcher: PullPush,
+        settings: PullPushModel,
+        segments: List[List[int]],
+        link_ids: asyncio.Queue[str]
+    ) -> None: ...
+
+    @overload
+    def _schedule_workers(
+        self,
+        tg: asyncio.TaskGroup,
+        tasks: Dict[str, List[asyncio.Task[list]]],
+        client: httpx.AsyncClient,
+        fetcher: ArcticShift,
+        settings: ArcticShiftModel,
+        segments: List[List[int]],
+        link_ids: asyncio.Queue[str]
+    ) -> None: ...
+
+    def _schedule_workers(
+        self,
+        tg: asyncio.TaskGroup,
+        tasks: Dict[str, List[asyncio.Task[list]]],
+        client: httpx.AsyncClient,
+        fetcher: PullPush | ArcticShift,
+        settings: PullPushModel | ArcticShiftModel,
+        segments: List[List[int]],
+        link_ids: asyncio.Queue[str]
+    ) -> None:
+        if isinstance(fetcher, PullPush):
+            assert isinstance(settings, PullPushModel)
+        elif isinstance(fetcher, ArcticShift):
+            assert isinstance(settings, ArcticShiftModel)
+        else:
+            raise TypeError("fetcher(service) & settings mismatch")
+
+        service_name = type(fetcher).__name__
+        for i, (after, before) in enumerate(segments):
+            segment_settings = settings.model_copy(
+                update={"after": after, "before": before}
+            )
+            tasks['submissions'].append(tg.create_task(fetcher.fetch_time_window(
+                client, segment_settings, link_ids, i
+            )))
+            self.logger.info(
+                f"{service_name} worker-{i} for {[after, before]} created")
+
+        # create link_id CONSUMER for comment fetching
+        if settings.fetch_post_comments:
+            for i in range(settings.no_sub_comment_workers):
+                tasks['comment_trees'].append(tg.create_task(fetcher.fetch_post_comments(
+                    client, settings, link_ids, i
+                )))
+                self.logger.info(
+                    f"{service_name} comment-sub-worker-{i} created")
+            tg.create_task(link_ids.join())
+
+    @overload
+    def _match_settings(
+            self, settings: PullPushModel
+        ) -> Tuple[PullPushModel, PullPush]: ...
+
+    @overload
+    def _match_settings(
+            self, settings: ArcticShiftModel
+        ) -> Tuple[ArcticShiftModel, ArcticShift]: ...
+
+    @overload
+    def _match_settings(
+            self, settings: dict
+        ) -> Tuple[PullPushModel | ArcticShiftModel, PullPush | ArcticShift]: ...
 
     def _match_settings(
             self, settings: Union[PullPushModel, ArcticShiftModel, dict]

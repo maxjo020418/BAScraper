@@ -56,20 +56,31 @@ class PullPushModel(BaseModel):
     """
     Pydantic model describing all supported Arctic Shift API parameters.
     """
-    _BASE_URL: StrictStr = "https://api.pullpush.io/reddit/search"
+
+    # TODO: exclusion flags and classvar declaration needs to be implemented
+    #   refer to arcticshift field settings!!
+
+    _BASE_URL: ClassVar[StrictStr] = "https://api.pullpush.io/reddit/search"
     logger: ClassVar[logging.Logger] = logging.getLogger(__name__)
 
-    service_type: ServiceType | None = None  # only used when passed in as dict (for identification)
+    # only used when passed in as dict (for identification)
+    service_type: ServiceType | None = Field(default=None, exclude=True)
+
     timezone: StrictStr = Field(default=get_localzone().key,
-                                validate_default=True)
+                                validate_default=True, exclude=True)
+    no_workers: StrictInt = Field(default=3, gt=0, exclude=True)  # number of coroutines
+    interval_sleep_ms: StrictInt = Field(default=500, ge=0, exclude=True)
+    cooldown_sleep_ms: StrictInt = Field(default=5000, ge=0, exclude=True)
+    max_retries: int = Field(default=10, ge=0, exclude=True)
+    backoff_factor: int | float = Field(default=1, ge=0, exclude=True)
 
-    endpoint: PullPushEndpointTypes
+    # default val None won't fetch comments under post
+    # if a service Model is set, it'll use that setting/model to fetch comments
+    fetch_post_comments: bool = Field(default=False, exclude=True)
+    # used for `fetch_post_comments`
+    no_sub_comment_workers: StrictInt = Field(default=3, gt=0, exclude=True)
 
-    no_workers: StrictInt = Field(default=3, gt=0)  # number of coroutines
-    interval_sleep_ms: StrictInt = Field(default=500, ge=0)
-    cooldown_sleep_ms: StrictInt = Field(default=5000, ge=0)
-    max_retries: int = Field(default=10, ge=0)
-    backoff_factor: int | float = Field(default=1, ge=0)
+    endpoint: PullPushEndpointTypes = Field(exclude=True)
 
     @field_validator("timezone")
     @classmethod
@@ -251,3 +262,7 @@ class PullPushModel(BaseModel):
         validate_temporal_order(self.after, self.before)
 
         return self
+
+    # TODO: Make sure that there is a field validator for "Field"
+    #   or equivelant field that controls what content the API returns!!
+    #   make it so that `id` and `created_utc` is included: crucial for orchestration
