@@ -38,19 +38,22 @@ from BAScraper.utils import (
 
 ServiceType = Literal["PullPush"]
 
-PullPushEndpointTypes = Literal['submission', 'comment']
+PullPushEndpointTypes = Literal["submission", "comment"]
+
 
 class PullPushGroup:
-    def __init__(self,
-                 group: Union[
-                     List[PullPushEndpointTypes],
-                     PullPushEndpointTypes,
-                    ]
+    def __init__(
+        self,
+        group: Union[
+            List[PullPushEndpointTypes],
+            PullPushEndpointTypes,
+        ],
     ) -> None:
-        self.group: List[PullPushEndpointTypes] = \
-            group if isinstance(group, list) else [group]
+        self.group: List[PullPushEndpointTypes] = group if isinstance(group, list) else [group]
+
 
 ###############################################################
+
 
 class PullPushModel(BaseModel):
     """
@@ -66,8 +69,7 @@ class PullPushModel(BaseModel):
     # only used when passed in as dict (for identification)
     service_type: ServiceType | None = Field(default=None, exclude=True)
 
-    timezone: StrictStr = Field(default=get_localzone().key,
-                                validate_default=True, exclude=True)
+    timezone: StrictStr = Field(default=get_localzone().key, validate_default=True, exclude=True)
     no_workers: StrictInt = Field(default=3, gt=0, exclude=True)  # number of coroutines
     interval_sleep_ms: StrictInt = Field(default=500, ge=0, exclude=True)
     cooldown_sleep_ms: StrictInt = Field(default=5000, ge=0, exclude=True)
@@ -104,119 +106,92 @@ class PullPushModel(BaseModel):
     ### for all endpoints ###
 
     q: Annotated[  # Search term. String / Quoted String for phrases
-        StrictStr | None,
-        PullPushGroup(['submission', 'comment'])
+        StrictStr | None, PullPushGroup(["submission", "comment"])
     ] = Field(
         default=None,
         min_length=1,
-        pattern=r'^(?:"[^"]*"|[^\s"]+)$'  # no spaces unless inside quoted strings
+        pattern=r'^(?:"[^"]*"|[^\s"]+)$',  # no spaces unless inside quoted strings
     )
 
     ids: Annotated[
-        List[Annotated[
-            StrictStr,
-            Field(pattern=reddit_id_rule)
-        ]] | str | None,
-        PullPushGroup(['submission', 'comment'])
+        List[Annotated[StrictStr, Field(pattern=reddit_id_rule)]] | str | None,
+        PullPushGroup(["submission", "comment"]),
     ] = Field(default=None)
 
-    size: Annotated[
-        StrictInt | None,
-        PullPushGroup(['submission', 'comment'])
-    ] = Field(default=None, gt=0, le=100)
+    size: Annotated[StrictInt | None, PullPushGroup(["submission", "comment"])] = Field(
+        default=None, gt=0, le=100
+    )
 
-    sort: Annotated[
-        Literal['asc', 'desc'] | None,
-        PullPushGroup(['submission', 'comment'])
-    ] = Field(default=None)
+    sort: Annotated[Literal["asc", "desc"] | None, PullPushGroup(["submission", "comment"])] = Field(
+        default=None
+    )
 
     sort_type: Annotated[
-        Literal['created_utc', 'score', 'num_comments'] | None,
-        PullPushGroup(['submission', 'comment'])
+        Literal["created_utc", "score", "num_comments"] | None,
+        PullPushGroup(["submission", "comment"]),
     ] = Field(default=None)
 
-    author: Annotated[
-        StrictStr | None,
-        PullPushGroup(['submission', 'comment'])
-    ] = Field(default=None, pattern=reddit_username_rule)
+    author: Annotated[StrictStr | None, PullPushGroup(["submission", "comment"])] = Field(
+        default=None, pattern=reddit_username_rule
+    )
 
-    subreddit: Annotated[
-        StrictStr | None,
-        PullPushGroup(['submission', 'comment'])
-    ] = Field(default=None, pattern=subreddit_name_rule)
+    subreddit: Annotated[StrictStr | None, PullPushGroup(["submission", "comment"])] = Field(
+        default=None, pattern=subreddit_name_rule
+    )
 
     after: Annotated[
         DateTime | datetime | StrictInt | StrictStr | None,
-        PullPushGroup(['submission', 'comment'])
+        PullPushGroup(["submission", "comment"]),
         # StrictStr type is ONLY FOR IDE LINTERS
         # Strings not matching DateTime format would be caught later
     ] = Field(default=None, union_mode="left_to_right")
 
     before: Annotated[
         DateTime | datetime | StrictInt | StrictStr | None,
-        PullPushGroup(['submission', 'comment'])
+        PullPushGroup(["submission", "comment"]),
         # StrictStr type is ONLY FOR IDE LINTERS
         # Strings not matching DateTime format would be caught later
     ] = Field(default=None, union_mode="left_to_right")
 
     ### for comment endpoint only ###
 
-    link_id: Annotated[
-        StrictStr | None,
-        PullPushGroup('comment')
-    ] = Field(default=None, pattern=reddit_id_rule)  # Base36 ID rule
+    link_id: Annotated[StrictStr | None, PullPushGroup("comment")] = Field(
+        default=None, pattern=reddit_id_rule
+    )  # Base36 ID rule
 
     ### for submission endpoint only ###
 
-    title: Annotated[
-        StrictStr | None,
-        PullPushGroup('submission')
-    ] = Field(default=None, min_length=1)
+    title: Annotated[StrictStr | None, PullPushGroup("submission")] = Field(default=None, min_length=1)
 
-    selftext: Annotated[
-        StrictStr | None,
-        PullPushGroup('submission')
-    ] = Field(default=None, min_length=1)
+    selftext: Annotated[StrictStr | None, PullPushGroup("submission")] = Field(default=None, min_length=1)
 
-    score: Annotated[
-        StrictStr | StrictInt | None,
-        PullPushGroup('submission')
-    ] = Field(default=None)
+    score: Annotated[StrictStr | StrictInt | None, PullPushGroup("submission")] = Field(default=None)
 
-    num_comments: Annotated[
-        StrictStr | StrictInt | None,
-        PullPushGroup('submission')
-    ] = Field(default=None)
+    num_comments: Annotated[StrictStr | StrictInt | None, PullPushGroup("submission")] = Field(default=None)
 
-    over_18: Annotated[
-        StrictBool | None,
-        PullPushGroup('submission')
-    ] = Field(default=None, deprecated="This field is not supported as of now by PullPush")
+    over_18: Annotated[StrictBool | None, PullPushGroup("submission")] = Field(
+        default=None, deprecated="This field is not supported as of now by PullPush"
+    )
 
-    is_video: Annotated[
-        StrictBool | None,
-        PullPushGroup('submission')
-    ] = Field(default=None, deprecated="This field is not supported as of now by PullPush")
+    is_video: Annotated[StrictBool | None, PullPushGroup("submission")] = Field(
+        default=None, deprecated="This field is not supported as of now by PullPush"
+    )
 
-    locked: Annotated[
-        StrictBool | None,
-        PullPushGroup('submission')
-    ] = Field(default=None, deprecated="This field is not supported as of now by PullPush")
+    locked: Annotated[StrictBool | None, PullPushGroup("submission")] = Field(
+        default=None, deprecated="This field is not supported as of now by PullPush"
+    )
 
-    stickied: Annotated[
-        StrictBool | None,
-        PullPushGroup('submission')
-    ] = Field(default=None, deprecated="This field is not supported as of now by PullPush")
+    stickied: Annotated[StrictBool | None, PullPushGroup("submission")] = Field(
+        default=None, deprecated="This field is not supported as of now by PullPush"
+    )
 
-    spoiler: Annotated[
-        StrictBool | None,
-        PullPushGroup('submission')
-    ] = Field(default=None, deprecated="This field is not supported as of now by PullPush")
+    spoiler: Annotated[StrictBool | None, PullPushGroup("submission")] = Field(
+        default=None, deprecated="This field is not supported as of now by PullPush"
+    )
 
-    contest_mode: Annotated[
-        StrictBool | None,
-        PullPushGroup('submission')
-    ] = Field(default=None, deprecated="This field is not supported as of now by PullPush")
+    contest_mode: Annotated[StrictBool | None, PullPushGroup("submission")] = Field(
+        default=None, deprecated="This field is not supported as of now by PullPush"
+    )
 
     @field_validator("score", "num_comments")
     @classmethod
@@ -237,7 +212,7 @@ class PullPushModel(BaseModel):
     @classmethod
     def check_id_list(cls, v: str | List[StrictStr]) -> StrictStr:
         if isinstance(v, list):
-            return ','.join(v)
+            return ",".join(v)
         else:
             return v
             # TODO:
@@ -253,7 +228,8 @@ class PullPushModel(BaseModel):
                 if isinstance(meta, PullPushGroup):
                     if self.endpoint not in meta.group:
                         raise ValueError(
-                            f"Field '{field_set}' is not supported for endpoint '{self.endpoint}'")
+                            f"Field '{field_set}' is not supported for endpoint '{self.endpoint}'"
+                        )
         return self
 
     @model_validator(mode="after")

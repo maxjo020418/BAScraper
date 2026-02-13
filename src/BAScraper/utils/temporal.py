@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from typing import Any, Tuple
 from zoneinfo import ZoneInfo
@@ -19,7 +19,7 @@ def parse_datetime_string(raw: str) -> datetime:
 
 
 def format_epoch_utc(epoch_utc: int) -> str:
-    return datetime.fromtimestamp(epoch_utc).strftime("%y%m%d-%H%M%S")
+    return datetime.fromtimestamp(epoch_utc, tz=timezone.utc).strftime("%y%m%d-%H%M%S")
 
 
 def localize_temporal_fields(

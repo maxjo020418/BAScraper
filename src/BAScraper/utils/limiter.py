@@ -2,6 +2,7 @@ import asyncio
 import time
 from aiolimiter import AsyncLimiter
 
+
 class AdaptiveRateLimiter:
     """
     One-process, multi-task safe limiter using:
@@ -11,6 +12,7 @@ class AdaptiveRateLimiter:
       Token gate: never allow more than locally-tracked remaining tokens before reset.
       Pacing: also apply a smooth AsyncLimiter to spread requests out.
     """
+
     def __init__(self, *, safety_margin: int = 1, max_pace_period: float = 60.0):
         self._lock = asyncio.Lock()
         self._cv = asyncio.Condition(self._lock)

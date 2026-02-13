@@ -55,7 +55,6 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9.1.2" },
     { name = "tzlocal", specifier = ">=5.3.1" },
 ]
-provides-extras = ["old"]
 
 [[package]]
 name = "certifi"

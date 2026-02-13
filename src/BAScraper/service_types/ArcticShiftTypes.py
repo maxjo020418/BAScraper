@@ -10,7 +10,7 @@ from typing import (
     Self,
     Tuple,
     Union,
-    Callable
+    Callable,
 )
 
 from datetime import datetime
@@ -38,7 +38,6 @@ from BAScraper.utils import (
     validate_temporal_order,
     validate_temporal_value,
 )
-from BAScraper.service_types.PullPushTypes import PullPushModel
 
 from pydantic_extra_types.pendulum_dt import DateTime
 import re
@@ -117,8 +116,7 @@ PostField = Union[_CommonField, _PostOnlyField]
 CommentField = Union[_CommonField, _CommentOnlyField]
 AllFields = Union[PostField, CommentField, SubredditField]
 
-TimeSeriesPrecision = Literal["year", "quarter", "month", "week",
-                              "day", "hour", "minute"]
+TimeSeriesPrecision = Literal["year", "quarter", "month", "week", "day", "hour", "minute"]
 
 REDDIT_ID_RE = re.compile(reddit_id_rule)
 SUBREDDIT_RE = re.compile(subreddit_name_rule)
@@ -200,8 +198,7 @@ class ArcticShiftModel(BaseModel):
     # only used when passed in as dict (for identification)
     service_type: ServiceType | None = Field(default=None, exclude=True)
 
-    timezone: StrictStr = Field(default=get_localzone().key,
-                                validate_default=True, exclude=True)
+    timezone: StrictStr = Field(default=get_localzone().key, validate_default=True, exclude=True)
     no_workers: StrictInt = Field(default=3, gt=0, exclude=True)
     interval_sleep_ms: StrictInt = Field(default=500, ge=0, exclude=True)
     cooldown_sleep_ms: StrictInt = Field(default=5000, ge=0, exclude=True)
@@ -295,7 +292,11 @@ class ArcticShiftModel(BaseModel):
                 (["subreddits"], ["search", "wikis", "wikis/list"]),
                 (
                     ["users"],
-                    ["interactions/users", "interactions/users/list", "interactions/subreddits"],
+                    [
+                        "interactions/users",
+                        "interactions/users/list",
+                        "interactions/subreddits",
+                    ],
                 ),
             ]
         ),
@@ -318,7 +319,11 @@ class ArcticShiftModel(BaseModel):
                 (["subreddits"], ["search"]),
                 (
                     ["users"],
-                    ["interactions/users", "interactions/users/list", "interactions/subreddits"],
+                    [
+                        "interactions/users",
+                        "interactions/users/list",
+                        "interactions/subreddits",
+                    ],
                 ),
                 (["time_series"], [None]),
             ]
@@ -335,7 +340,11 @@ class ArcticShiftModel(BaseModel):
                 (["subreddits"], ["search"]),
                 (
                     ["users"],
-                    ["interactions/users", "interactions/users/list", "interactions/subreddits"],
+                    [
+                        "interactions/users",
+                        "interactions/users/list",
+                        "interactions/subreddits",
+                    ],
                 ),
                 (["time_series"], [None]),
             ]
@@ -354,7 +363,11 @@ class ArcticShiftModel(BaseModel):
                 (["posts", "comments"], ["search/aggregate"]),
                 (
                     ["users"],
-                    ["interactions/users", "interactions/users/list", "interactions/subreddits"],
+                    [
+                        "interactions/users",
+                        "interactions/users/list",
+                        "interactions/subreddits",
+                    ],
                 ),
             ]
         ),
@@ -368,7 +381,7 @@ class ArcticShiftModel(BaseModel):
                 (["subreddits"], ["search"]),
                 (["users"], ["search"]),
             ]
-        )
+        ),
     ] = Field(default=None)
 
     crosspost_parent_id: Annotated[
@@ -522,7 +535,11 @@ class ArcticShiftModel(BaseModel):
                 (["posts", "comments"], ["search/aggregate"]),
                 (
                     ["users"],
-                    ["interactions/users", "interactions/users/list", "interactions/subreddits"],
+                    [
+                        "interactions/users",
+                        "interactions/users/list",
+                        "interactions/subreddits",
+                    ],
                 ),
             ]
         ),
@@ -676,9 +693,7 @@ class ArcticShiftModel(BaseModel):
         ),
     ] = Field(default=None)
 
-    _ALLOWED_LOOKUPS: ClassVar[
-        Dict[ArcticShiftEndpointTypes, set[Optional[ArcticShiftLookupTypes]]]
-    ] = {
+    _ALLOWED_LOOKUPS: ClassVar[Dict[ArcticShiftEndpointTypes, set[Optional[ArcticShiftLookupTypes]]]] = {
         "posts": {"ids", "search", "search/aggregate"},
         "comments": {"ids", "search", "tree", "search/aggregate"},
         "subreddits": {"ids", "search", "rules", "wikis", "wikis/list"},
@@ -745,13 +760,13 @@ class ArcticShiftModel(BaseModel):
         # `id` and `created_utc` must be included to index/paginate
         if isinstance(value, str):
             value_temp: List[str] = [value]
-        elif isinstance(value, list):
-            value_temp = value.copy() # type: ignore
+        else:
+            value_temp = list(value)
 
-        if 'created_utc' not in value:
-            value_temp.append('created_utc')
-        if 'id' not in value:
-            value_temp.append('id')
+        if "created_utc" not in value_temp:
+            value_temp.append("created_utc")
+        if "id" not in value_temp:
+            value_temp.append("id")
 
         return value_temp
 
@@ -759,9 +774,11 @@ class ArcticShiftModel(BaseModel):
     def validate_lookup(self) -> Self:
         allowed = self._ALLOWED_LOOKUPS[self.endpoint]
         if self.lookup not in allowed:
-            allowed_values = \
-                f"\"lookup field not needed for `{self.endpoint}`\"" \
-                if None in allowed else ", ".join(sorted(str(item) for item in allowed if item))
+            allowed_values = (
+                f'"lookup field not needed for `{self.endpoint}`"'
+                if None in allowed
+                else ", ".join(sorted(str(item) for item in allowed if item))
+            )
             raise ValueError(
                 f"Lookup '{self.lookup}' is not supported for endpoint '{self.endpoint}'. "
                 f"Allowed values: {allowed_values}"
@@ -774,10 +791,7 @@ class ArcticShiftModel(BaseModel):
 
             # metadatas is a list of metadata(Attributes) within the set fields (model_fields_set)
             # below checks/finds `ArcticShiftGroup` exists within the metadata(s)
-            group_meta = next(
-                    (meta for meta in metadata if isinstance(meta, ArcticShiftGroup)), 
-                    None
-                )
+            group_meta = next((meta for meta in metadata if isinstance(meta, ArcticShiftGroup)), None)
             if not group_meta:  # skip if no `ArcticShiftGroup` is found
                 continue
 
@@ -785,9 +799,8 @@ class ArcticShiftModel(BaseModel):
             for endpoints, lookups in group_meta.group:
                 if self.endpoint not in endpoints:
                     continue
-                if (
-                    (self.lookup is None and None in lookups)
-                    or (self.lookup is not None and self.lookup in lookups)
+                if (self.lookup is None and None in lookups) or (
+                    self.lookup is not None and self.lookup in lookups
                 ):
                     valid_combination = True
                     break
@@ -942,7 +955,11 @@ class ArcticShiftModel(BaseModel):
                 "For search/aggregate, 'limit' must be >= 1 or an empty string to remove the limit."
             )
 
-        if self.lookup in {"interactions/users", "interactions/users/list", "interactions/subreddits"}:
+        if self.lookup in {
+            "interactions/users",
+            "interactions/users/list",
+            "interactions/subreddits",
+        }:
             if limit_value == "" or (isinstance(limit_value, int) and limit_value >= 1):
                 return
             raise ValueError(

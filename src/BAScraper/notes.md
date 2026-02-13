@@ -1,6 +1,7 @@
-Let the function accept both dict and model
+(notes for user config setup principle)
 
-If you want to allow flexibility:
+Let the function accept both dict and model
+If flexibility is needed... :
 
 ```python
 from typing import Union

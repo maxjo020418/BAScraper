@@ -5,32 +5,26 @@ from httpx import AsyncClient, Response
 import logging
 import tempfile
 import os
-from typing import (
-    Generic,
-    TypeVar,
-    List,
-    Tuple,
-    Literal,
-    Callable,
-    Awaitable,
-    overload)
+from typing import Generic, TypeVar, List, Tuple, Literal, Callable, Awaitable, overload
 from tenacity import (
     retry,
     wait_random_exponential,
     stop_after_attempt,
     before_sleep_log,
     retry_if_exception_type,
-    RetryError
+    RetryError,
 )
 
 from BAScraper.service_types import ArcticShiftModel, PullPushModel
 
 TSettings = TypeVar("TSettings", PullPushModel, ArcticShiftModel)
-T = TypeVar('T')
+T = TypeVar("T")
+
 
 class BaseService(Generic[TSettings]):
     class RateLimitRetry(Exception):
         """Raised to manually trigger the tenacity retry loop."""
+
         pass
 
     def __init__(self, settings: TSettings) -> None:
@@ -46,14 +40,13 @@ class BaseService(Generic[TSettings]):
         self.retryable_exception = (
             httpx.NetworkError,
             httpx.TimeoutException,
-            self.RateLimitRetry
+            self.RateLimitRetry,
         )
         self.service_retry = retry(  # retry decorator func.
-            wait=wait_random_exponential(multiplier=settings.backoff_factor,
-                                         min=1, max=10),
+            wait=wait_random_exponential(multiplier=settings.backoff_factor, min=1, max=10),
             stop=stop_after_attempt(settings.max_retries),
             before_sleep=before_sleep_log(self.logger, logging.WARNING),
-            retry=retry_if_exception_type(self.retryable_exception)
+            retry=retry_if_exception_type(self.retryable_exception),
         )
 
     async def response_code_handler(self, response: Response) -> Response:
@@ -72,8 +65,7 @@ class BaseService(Generic[TSettings]):
         match response.status_code:
             case 429:
                 self.rate_limit_clear.clear()  # stop all async jobs
-                ratelimit_reset = \
-                    int(response.headers.get("X-RateLimit-Reset", self.cooldown_sleep_ms))
+                ratelimit_reset = int(response.headers.get("X-RateLimit-Reset", self.cooldown_sleep_ms))
                 self.logger.warning(
                     "Rate limit reached!\n"
                     f"Ratelimit reset/cooldown time: {ratelimit_reset}\n"
@@ -99,24 +91,25 @@ class BaseService(Generic[TSettings]):
                 # just throw exception for now
                 ...
 
-        assert "data" in response.json(), \
-            "Cannot find `data` in response json, maybe malformed response?" \
-                f"Response body: {response.text}"
+        assert "data" in response.json(), (
+            f"Cannot find `data` in response json, maybe malformed response?Response body: {response.text}"
+        )
 
         return response.raise_for_status()
 
     async def response_exception_handler(
-            self, *,
-            op: Callable[[], Awaitable[T]],
-            on_retryable: Callable[[BaseException], Awaitable[T]],
-            on_terminal_retryable: Callable[[BaseException], Awaitable[T]],
-            on_cancel: Callable[[BaseException], Awaitable[T]],
-            on_final: Callable[[], Awaitable[None]]
-        ) -> T:
-        '''
+        self,
+        *,
+        op: Callable[[], Awaitable[T]],
+        on_retryable: Callable[[BaseException], Awaitable[T]],
+        on_terminal_retryable: Callable[[BaseException], Awaitable[T]],
+        on_cancel: Callable[[BaseException], Awaitable[T]],
+        on_final: Callable[[], Awaitable[None]],
+    ) -> T:
+        """
         unified try/except/else block for reqeust handling, handles common exceptions.
         use with `response_code_handler` to get appropriate exception thrown inside `op`
-        '''
+        """
         try:
             return await op()
 
@@ -133,86 +126,90 @@ class BaseService(Generic[TSettings]):
             await on_final()
 
     def create_tempfile(self, file_suffix: str, dir: str = "./") -> tempfile._TemporaryFileWrapper:
-        temp_file = tempfile.NamedTemporaryFile(mode="w+", dir=dir,
-                                                prefix="BAScraper_",
-                                                suffix=file_suffix,
-                                                delete=False)
+        temp_file = tempfile.NamedTemporaryFile(
+            mode="w+", dir=dir, prefix="BAScraper_", suffix=file_suffix, delete=False
+        )
         self.logger.info(f"temp file created as: {temp_file.name}")
         return temp_file
 
     def cleanup_tempfile(self, temp_file: tempfile._TemporaryFileWrapper):
-            temp_file.flush()
-            temp_file.close()
-            self.logger.info(f"cleaning up tempfile '{temp_file.name}'...")
-            os.unlink(temp_file.name)
+        temp_file.flush()
+        temp_file.close()
+        self.logger.info(f"cleaning up tempfile '{temp_file.name}'...")
+        os.unlink(temp_file.name)
 
     ### wrappers for the actual function (to include the retry function) ###
 
-    async def fetch_time_window(self,
-                                client: AsyncClient,
-                                settings: TSettings,
-                                link_ids: Queue[str],
-                                worker_id: int) -> List[dict]:
-        return await self.service_retry \
-            (self._fetch_time_window)(client, settings, link_ids, worker_id)
+    async def fetch_time_window(
+        self,
+        client: AsyncClient,
+        settings: TSettings,
+        link_ids: Queue[str],
+        worker_id: int,
+    ) -> List[dict]:
+        return await self.service_retry(self._fetch_time_window)(client, settings, link_ids, worker_id)
 
-    async def fetch_once(self,
-                         client: AsyncClient,
-                         settings: TSettings,
-                         link_ids: Queue[str]) -> List[dict]:
+    async def fetch_once(self, client: AsyncClient, settings: TSettings, link_ids: Queue[str]) -> List[dict]:
         return await self.service_retry(self._fetch_once)(client, settings, link_ids)
 
-    async def fetch_post_comments(self,
-                                  client: AsyncClient,
-                                  settings: TSettings,
-                                  link_ids: Queue[str],
-                                  worker_id: int = -1) -> List[List[dict]]:
-        return await self.service_retry \
-            (self._fetch_post_comments)(client, settings, link_ids, worker_id)
+    async def fetch_post_comments(
+        self,
+        client: AsyncClient,
+        settings: TSettings,
+        link_ids: Queue[str],
+        worker_id: int = -1,
+    ) -> List[List[dict]]:
+        return await self.service_retry(self._fetch_post_comments)(client, settings, link_ids, worker_id)
 
     ### actual logics for requesting ###
 
     @overload
-    async def _fetch_once(self,
-                          client: AsyncClient,
-                          settings: TSettings,
-                          link_ids: Queue[str],
-                          return_count: Literal[False] = False,
-                          ) -> List[dict]: ...
+    async def _fetch_once(
+        self,
+        client: AsyncClient,
+        settings: TSettings,
+        link_ids: Queue[str],
+        return_count: Literal[False] = False,
+    ) -> List[dict]: ...
 
     @overload
-    async def _fetch_once(self,
-                          client: AsyncClient,
-                          settings: TSettings,
-                          link_ids: Queue[str],
-                          return_count: Literal[True],
-                          ) -> Tuple[List[dict], int]: ...
+    async def _fetch_once(
+        self,
+        client: AsyncClient,
+        settings: TSettings,
+        link_ids: Queue[str],
+        return_count: Literal[True],
+    ) -> Tuple[List[dict], int]: ...
 
-    async def _fetch_once(self,
-                          client: AsyncClient,
-                          settings: TSettings,
-                          link_ids: Queue[str],
-                          return_count: bool = False,  # only used by `_fetch_time_window`
-                          ) -> List[dict] | Tuple[List[dict], int]:
-        raise NotImplementedError('Not for direct use')
+    async def _fetch_once(
+        self,
+        client: AsyncClient,
+        settings: TSettings,
+        link_ids: Queue[str],
+        return_count: bool = False,  # only used by `_fetch_time_window`
+    ) -> List[dict] | Tuple[List[dict], int]:
+        raise NotImplementedError("Not for direct use")
 
-    async def _fetch_time_window(self,
-                                 client: AsyncClient,
-                                 settings: TSettings,
-                                 link_ids: Queue[str],
-                                 worker_id: int) -> List[dict]:
-        raise NotImplementedError('Not for direct use')
+    async def _fetch_time_window(
+        self,
+        client: AsyncClient,
+        settings: TSettings,
+        link_ids: Queue[str],
+        worker_id: int,
+    ) -> List[dict]:
+        raise NotImplementedError("Not for direct use")
 
-    async def _fetch_post_comments(self,
-                                   client: AsyncClient,
-                                   settings: TSettings,
-                                   link_ids: Queue[str],
-                                   worker_id: int = -1) -> List[List[dict]]:
-        raise NotImplementedError('Not for direct use')
-
+    async def _fetch_post_comments(
+        self,
+        client: AsyncClient,
+        settings: TSettings,
+        link_ids: Queue[str],
+        worker_id: int = -1,
+    ) -> List[List[dict]]:
+        raise NotImplementedError("Not for direct use")
 
     ### helper functions ###
 
     # TODO: check if there are duplicate results and add duplicate handling if needed.
     async def parse_response(self, response: Response):
-        raise NotImplementedError('Not for direct use')
+        raise NotImplementedError("Not for direct use")
