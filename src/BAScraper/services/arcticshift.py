@@ -1,4 +1,4 @@
-from BAScraper.services import BaseService
+from .base_service import BaseService
 from BAScraper.service_types import ArcticShiftModel
 from BAScraper.utils import AdaptiveRateLimiter
 
@@ -158,6 +158,8 @@ class ArcticShift(BaseService[ArcticShiftModel]):
     ) -> List[List[dict]]:
         temp_file = self.create_tempfile("_comments_tempfile.json")
         data: List[List[dict]] = list()
+        # Build and validate once per worker; only `link_id` changes per request.
+        comment_settings: ArcticShiftModel | None = None
         """
         data = [
             [{comment 1}, {comment 2}, ...],  # comment tree for submission 1
@@ -167,20 +169,26 @@ class ArcticShift(BaseService[ArcticShiftModel]):
         """
 
         async def get_comment_tree(current_id: str) -> List[dict]:
-            result = await self._fetch_once(
-                client,
-                ArcticShiftModel(
+            nonlocal comment_settings
+            if comment_settings is None:
+                comment_settings = ArcticShiftModel(
                     endpoint="comments",
                     lookup="tree",
                     no_workers=settings.no_sub_comment_workers,
                     limit=25000,
-                    link_id=current_id,  # Use the passed ID
+                    link_id=current_id,
                     timezone=settings.timezone,
                     interval_sleep_ms=settings.interval_sleep_ms,
                     cooldown_sleep_ms=settings.cooldown_sleep_ms,
                     max_retries=settings.max_retries,
                     backoff_factor=settings.backoff_factor,
-                ),
+                )
+            else:
+                comment_settings.link_id = current_id
+
+            result = await self._fetch_once(
+                client,
+                comment_settings,
                 link_ids,
             )
             json.dump(result, temp_file)

@@ -3,6 +3,7 @@ import httpx
 import asyncio
 import math
 import logging
+from tqdm import tqdm
 
 from BAScraper.service_types import PullPushModel, ArcticShiftModel
 from BAScraper.services import PullPush, ArcticShift
@@ -95,7 +96,7 @@ class BAScraper:
             tasks["submissions"].reverse()
 
             submissions: Dict[str, dict] = dict()
-            for task in tasks["submissions"]:
+            for task in tqdm(tasks["submissions"], dynamic_ncols=True, desc="indexing submissions"):
                 # indexing: base36 id as key and json data as val
                 _submissions: Dict[str, dict] = {submission["id"]: submission for submission in task.result()}
                 conflicts = submissions.keys() & _submissions.keys()
@@ -110,7 +111,7 @@ class BAScraper:
                 for elem in submissions.values():
                     elem["comments"] = list()
 
-                for task in tasks["comment_trees"]:
+                for task in tqdm(tasks["comment_trees"], dynamic_ncols=True, desc="inserting comments"):
                     for comment_tree in task.result():
                         if comment_tree:  # empty results may exist
                             # link_id is same for all comment result within the same tree
@@ -122,6 +123,7 @@ class BAScraper:
 
         # no time partitioned pagination, just single request to the endpoint
         else:
+            # TODO: post comment fetching is NOT implemented
             single_result: List[dict]
             async with httpx.AsyncClient(http2=True) as client:
                 if isinstance(fetcher, PullPush):

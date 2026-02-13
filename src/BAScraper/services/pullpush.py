@@ -1,4 +1,4 @@
-from BAScraper.services import BaseService
+from .base_service import BaseService
 from BAScraper.service_types import PullPushModel
 
 from asyncio import Queue
