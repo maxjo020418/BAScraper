@@ -28,7 +28,7 @@ def main():
         # ids=["123123","23we"],
         subreddit="r/umamusume",
         after="2025-10-25",
-        before="2025-10-26T15:30:00Z",
+        before="2025-10-25T12:00:00Z",
         # sort="asc",
         # limit=50,
         # title="release",

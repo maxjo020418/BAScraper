@@ -53,7 +53,7 @@ class BAScraper:
             # clamping the final end time to be exactly `before`
             segments[-1][-1] = v_settings.before
 
-            tasks: Dict[str, List[asyncio.Task[List[dict]]]] = {
+            tasks: Dict[str, List[asyncio.Task[List]]] = {
                 'submissions': [],
                 'comment_trees': []  # for comment fetching from submissions
             }
@@ -95,28 +95,34 @@ class BAScraper:
             # segments are in reverse order (set to "new -> old")
             tasks['submissions'].reverse()
 
-            submission_results: List[dict] = list()
+            submissions: Dict[str, dict] = dict()
             for task in tasks['submissions']:
-                submission_results += task.result()
+                # indexing: base36 id as key and json data as val
+                _submissions: Dict[str, dict] = \
+                    {submission['id'] : submission for submission in task.result()}
+                conflicts = submissions.keys() & _submissions.keys()
 
-            # indexing: base36 id as key and json data as val
-            inexed_submission_results: Dict[str, dict] = \
-                {ent.pop('id') : ent for ent in submission_results}
+                if conflicts:
+                    self.logger.warning(
+                        f'Conflicts in submissions found!: \n{conflicts}')
+
+                submissions = submissions | _submissions
 
             # add comment to submission results if flag enabled
             if v_settings.fetch_post_comments:
 
-                for elem in inexed_submission_results.values():
+                for elem in submissions.values():
                     elem['comments'] = list()
 
                 for task in tasks['comment_trees']:
-                    if len(comment_tree := task.result()):  # empty results may exist
-                        # link_id is same for all comment result within the same tree
-                        # [3:] is to remove the "t3_xxx" prefix for the link_id
-                        link_id = comment_tree[0]['data']['link_id'][3:]
-                        inexed_submission_results[link_id]['comments'] = comment_tree
+                    for comment_tree in task.result():
+                        if comment_tree:  # empty results may exist
+                            # link_id is same for all comment result within the same tree
+                            # [3:] is to remove the "t3_xxx" prefix for the link_id
+                            link_id = comment_tree[0]['link_id'][3:]
+                            submissions[link_id]['comments'] = comment_tree
 
-            return inexed_submission_results
+            return submissions
 
         # no time partitioned pagination, just single request to the endpoint
         else:

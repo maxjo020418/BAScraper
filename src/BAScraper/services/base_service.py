@@ -166,7 +166,7 @@ class BaseService(Generic[TSettings]):
                                   client: AsyncClient,
                                   settings: TSettings,
                                   link_ids: Queue[str],
-                                  worker_id: int = -1) -> List[dict]:
+                                  worker_id: int = -1) -> List[List[dict]]:
         return await self.service_retry \
             (self._fetch_post_comments)(client, settings, link_ids, worker_id)
 
@@ -207,7 +207,7 @@ class BaseService(Generic[TSettings]):
                                    client: AsyncClient,
                                    settings: TSettings,
                                    link_ids: Queue[str],
-                                   worker_id: int = -1) -> List[dict]:
+                                   worker_id: int = -1) -> List[List[dict]]:
         raise NotImplementedError('Not for direct use')
 
 

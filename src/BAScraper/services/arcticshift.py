@@ -146,9 +146,16 @@ class ArcticShift(BaseService[ArcticShiftModel]):
                                 client: AsyncClient,
                                 settings: ArcticShiftModel,
                                 link_ids: Queue[str],
-                                worker_id: int = -1) -> List[dict]:
-        data: List[dict] = list()
+                                worker_id: int = -1) -> List[List[dict]]:
         temp_file = self.create_tempfile("_comments_tempfile.json")
+        data: List[List[dict]] = list()
+        """
+        data = [
+            [{comment 1}, {comment 2}, ...],  # comment tree for submission 1
+            [{comment 1}, {comment 2}, ...],  # comment tree for submission 2
+            ...
+        ]
+        """
 
         async def get_comment_tree(current_id: str) -> List[dict]:
             result = await self._fetch_once(
@@ -179,7 +186,7 @@ class ArcticShift(BaseService[ArcticShiftModel]):
         async def on_terminal_retryable(_: BaseException):
             self.logger.error(f"Worker-{worker_id}: Max retries for item! Skipping.")
             link_ids.task_done()
-            return tree
+            return []
 
         async def on_cancel(err: BaseException):
             self.logger.error(f"Worker-{worker_id}: Cancelled.")
@@ -207,6 +214,6 @@ class ArcticShift(BaseService[ArcticShiftModel]):
                 on_cancel=on_cancel,
                 on_final=on_final
             )
-            data += tree
+            data.append([d['data'] for d in tree])
             link_ids.task_done()
             self.logger.info(f"Remaining comment queue: {link_ids.qsize()}")
