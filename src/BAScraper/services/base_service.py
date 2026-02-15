@@ -36,6 +36,9 @@ class BaseService(Generic[TSettings]):
 
         self.rate_limit_clear = Event()
         self.rate_limit_clear.set()  # `.set()` if it's okay to proceed
+        self._cooldown_until = 0.0
+        self._cooldown_task: asyncio.Task[None] | None = None
+        self._cooldown_lock = Lock()
 
         self.retryable_exception = (
             httpx.NetworkError,
@@ -48,6 +51,33 @@ class BaseService(Generic[TSettings]):
             before_sleep=before_sleep_log(self.logger, logging.WARNING),
             retry=retry_if_exception_type(self.retryable_exception),
         )
+
+    async def _cooldown_controller(self) -> None:
+        loop = asyncio.get_running_loop()
+        try:
+            while True:
+                async with self._cooldown_lock:
+                    sleep_for = self._cooldown_until - loop.time()
+                if sleep_for <= 0:
+                    break
+                await asyncio.sleep(sleep_for)
+        finally:
+            async with self._cooldown_lock:
+                self.rate_limit_clear.set()
+                self._cooldown_task = None
+
+    async def _start_or_extend_cooldown(self, seconds: float) -> None:
+        loop = asyncio.get_running_loop()
+        async with self._cooldown_lock:
+            cooldown_seconds = max(0.0, float(seconds))
+            new_until = loop.time() + cooldown_seconds
+            self._cooldown_until = max(self._cooldown_until, new_until)
+            self.rate_limit_clear.clear()
+            if self._cooldown_task is None or self._cooldown_task.done():
+                self._cooldown_task = asyncio.create_task(self._cooldown_controller())
+
+    async def wait_for_ratelimit_clear(self) -> None:
+        await self.rate_limit_clear.wait()
 
     async def response_code_handler(self, response: Response) -> Response:
         """
@@ -64,18 +94,20 @@ class BaseService(Generic[TSettings]):
         """
         match response.status_code:
             case 429:
-                self.rate_limit_clear.clear()  # stop all async jobs
-                ratelimit_reset = int(response.headers.get("X-RateLimit-Reset", self.cooldown_sleep_ms))
+                ratelimit_reset_raw = response.headers.get("X-RateLimit-Reset")
+                if ratelimit_reset_raw is None:
+                    ratelimit_reset = self.cooldown_sleep_ms / 1000.0
+                else:
+                    try:
+                        ratelimit_reset = float(ratelimit_reset_raw)
+                    except ValueError:
+                        ratelimit_reset = self.cooldown_sleep_ms / 1000.0
                 self.logger.warning(
                     "Rate limit reached!\n"
                     f"Ratelimit reset/cooldown time: {ratelimit_reset}\n"
-                    "Sleeping until ratelimit cooldown..."
+                    "Pausing workers until ratelimit cooldown..."
                 )
-                # TODO:
-                #   check if this is safe? Never tested if this actually works
-                #   as in: I've never hit the ratelimit_reset reliably
-                await asyncio.sleep(ratelimit_reset)
-                self.rate_limit_clear.set()
+                await self._start_or_extend_cooldown(ratelimit_reset)
                 raise self.RateLimitRetry()  # should trigger retry
             case 422:
                 # ArcticShift occasionally returns 422 for some reason
@@ -147,7 +179,7 @@ class BaseService(Generic[TSettings]):
         link_ids: Queue[str],
         worker_id: int,
     ) -> List[dict]:
-        return await self.service_retry(self._fetch_time_window)(client, settings, link_ids, worker_id)
+        return await self._fetch_time_window(client, settings, link_ids, worker_id)
 
     async def fetch_once(self, client: AsyncClient, settings: TSettings, link_ids: Queue[str]) -> List[dict]:
         return await self.service_retry(self._fetch_once)(client, settings, link_ids)
@@ -159,7 +191,7 @@ class BaseService(Generic[TSettings]):
         link_ids: Queue[str],
         worker_id: int = -1,
     ) -> List[List[dict]]:
-        return await self.service_retry(self._fetch_post_comments)(client, settings, link_ids, worker_id)
+        return await self._fetch_post_comments(client, settings, link_ids, worker_id)
 
     ### actual logics for requesting ###
 

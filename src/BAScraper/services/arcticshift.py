@@ -9,6 +9,7 @@ from typing import List, Tuple, Literal, overload
 from httpx import AsyncClient
 from urllib.parse import urljoin
 from asyncio import Queue
+from tenacity import RetryError
 
 TSettings = ArcticShiftModel
 END = "<END>"
@@ -55,6 +56,7 @@ class ArcticShift(BaseService[ArcticShiftModel]):
         params = settings.model_dump(exclude_none=True)
         url = urljoin(settings._BASE_URL, f"{settings.endpoint}/{settings.lookup}")
 
+        await self.wait_for_ratelimit_clear()
         await self.limiter.acquire()
         response = await client.get(url=url, params=params)
         response = await self.response_code_handler(response)
@@ -99,13 +101,20 @@ class ArcticShift(BaseService[ArcticShiftModel]):
         end_time: int = settings.after
         temp_file = self.create_tempfile("_tempfile.json")
         data: List[dict] = list()
+        retry_fetch_once = self.service_retry(self._fetch_once)
 
-        async def operation() -> List[dict]:
-            nonlocal cursor, data
+        try:
             # condition is not rly need in practice but just in case to prevent inf loop
             while cursor > end_time:
                 settings.before = cursor
-                resp_json, result_count = await self._fetch_once(client, settings, link_ids, True)
+                try:
+                    resp_json, result_count = await retry_fetch_once(client, settings, link_ids, True)
+                except RetryError as err:
+                    # !! tenacity.RetryError is when retry options are exhausted !!
+                    self.logger.error(
+                        f"worker-{worker_id} Maximum retry reached for cursor={cursor}! Aborting...\n{err}"
+                    )
+                    break
 
                 if result_count <= 0:
                     break
@@ -120,34 +129,12 @@ class ArcticShift(BaseService[ArcticShiftModel]):
                     f"worker-{worker_id} progress: "
                     f"{ceil((start_time - cursor) / (start_time - end_time) * 100)}%"
                 )
-
-            self.cleanup_tempfile(temp_file)
-            return data
-
-        async def on_retryable(err: BaseException):
-            # perform cleanup to prevent tempfile accumulating between retries
-            self.cleanup_tempfile(temp_file)
-            raise err  # passed to tencity to attempt retry
-
-        async def on_terminal_retryable(err: BaseException):
-            # !! tenacity.RetryError is when retry options are exhausted !!
-            self.logger.error(f"worker-{worker_id} Maximum retry reached! Aborting...\n{err}")
-            return data  # tempfile will not be closed
-
-        async def on_cancel(_: BaseException):
+        except KeyboardInterrupt:
             self.logger.error(f"worker-{worker_id} Has been cancelled!")
-            return data  # tempfile will not be closed
+        finally:
+            self.cleanup_tempfile(temp_file)
 
-        async def on_final():
-            pass
-
-        return await self.response_exception_handler(
-            op=operation,
-            on_retryable=on_retryable,
-            on_terminal_retryable=on_terminal_retryable,
-            on_cancel=on_cancel,
-            on_final=on_final,
-        )
+        return data
 
     async def _fetch_post_comments(
         self,
@@ -194,43 +181,28 @@ class ArcticShift(BaseService[ArcticShiftModel]):
             json.dump(result, temp_file)
             return result
 
-        async def on_retryable(err: BaseException):
-            # perform cleanup to prevent tempfile accumulating between retries
-            # DO NOT USE .task_done() here
-            self.cleanup_tempfile(temp_file)
-            raise err
+        retry_get_comment_tree = self.service_retry(get_comment_tree)
 
-        async def on_terminal_retryable(_: BaseException):
-            self.logger.error(f"Worker-{worker_id}: Max retries for item! Skipping.")
-            link_ids.task_done()
-            return []
+        try:
+            while True:  # main consumer loop
+                current_id = await link_ids.get()
 
-        async def on_cancel(err: BaseException):
+                if current_id == END:  # check for sentinel token
+                    link_ids.task_done()
+                    return data
+
+                try:
+                    tree = await retry_get_comment_tree(current_id)
+                except RetryError:
+                    self.logger.error(f"Worker-{worker_id}: Max retries for item! Skipping.")
+                    link_ids.task_done()
+                    continue
+
+                data.append([d["data"] for d in tree])
+                link_ids.task_done()
+                self.logger.info(f"Remaining comment queue: {link_ids.qsize()}")
+        except KeyboardInterrupt as err:
             self.logger.error(f"Worker-{worker_id}: Cancelled.")
             raise err
-
-        async def on_final():
-            pass
-
-        while True:  # main consumer loop
-            current_id = await link_ids.get()
-
-            if current_id == END:  # check for sentinel token
-                link_ids.task_done()
-                self.cleanup_tempfile(temp_file)
-                return data
-
-            # wrapper
-            async def operation():
-                return await get_comment_tree(current_id)
-
-            tree = await self.response_exception_handler(
-                op=operation,
-                on_retryable=on_retryable,
-                on_terminal_retryable=on_terminal_retryable,
-                on_cancel=on_cancel,
-                on_final=on_final,
-            )
-            data.append([d["data"] for d in tree])
-            link_ids.task_done()
-            self.logger.info(f"Remaining comment queue: {link_ids.qsize()}")
+        finally:
+            self.cleanup_tempfile(temp_file)
